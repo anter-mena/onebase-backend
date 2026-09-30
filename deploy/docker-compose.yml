@@ -5,6 +5,9 @@ services:
     image: ${BACKEND_IMAGE}
     container_name: onebase-backend
     restart: unless-stopped
+    # Secrets (Swagger login, later DB passwords…). Lives only on the VPS,
+    # never in git: /opt/onebase/backend.env, readable by the deploy user only.
+    env_file: backend.env
     ports:
       # Public for now so the deploy can be checked from a browser.
       # Step 4 (security) puts Nginx + HTTPS in front and closes this port.
