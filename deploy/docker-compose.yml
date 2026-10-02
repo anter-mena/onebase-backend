@@ -1,16 +1,42 @@
 # Runs on the VPS in /opt/onebase. The pipeline copies this file there on every deploy
 # and writes BACKEND_IMAGE into /opt/onebase/.env.
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: onebase-db
+    restart: unless-stopped
+    # POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD. Lives only on the VPS:
+    # /opt/onebase/db.env, readable by the deploy user only.
+    env_file: db.env
+    # No "ports:" on purpose — only the backend, on Docker's internal network, can reach it.
+    volumes:
+      # The data. Survives every redeploy; only "docker compose down -v" would delete it.
+      - onebase_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   backend:
     image: ${BACKEND_IMAGE}
     container_name: onebase-backend
     restart: unless-stopped
-    # Secrets (Swagger login, later DB passwords…). Lives only on the VPS,
+    # Secrets (Swagger login, DB password, JWT secret…). Lives only on the VPS,
     # never in git: /opt/onebase/backend.env, readable by the deploy user only.
     env_file: backend.env
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       # Public for now so the deploy can be checked from a browser.
-      # Step 4 (security) puts Nginx + HTTPS in front and closes this port.
+      # HTTPS (Caddy) will sit in front and close this port — see BugForLater.md.
       - "8080:8080"
     mem_limit: 1g
     logging:
@@ -18,3 +44,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  onebase_db:

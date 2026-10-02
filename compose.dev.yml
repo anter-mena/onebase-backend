@@ -1,0 +1,17 @@
+# Local development database only. Start:  docker compose -f compose.dev.yml up -d
+# Uses DB_PASSWORD from .env, so the app and the database agree.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: onebase-db-dev
+    environment:
+      POSTGRES_DB: onebase
+      POSTGRES_USER: onebase
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - onebase_db_dev:/var/lib/postgresql/data
+
+volumes:
+  onebase_db_dev:

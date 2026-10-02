@@ -12,7 +12,8 @@ docker compose up -d --remove-orphans
 docker image prune -f
 
 # Wait for Spring Boot to report healthy; fail the deploy if it never does.
-for _ in $(seq 1 30); do
+# Up to 90 s: the database has to be ready and Flyway may run migrations first.
+for _ in $(seq 1 45); do
   if curl -fsS http://localhost:8080/actuator/health 2>/dev/null; then
     echo
     echo "Deployed ${IMAGE}"
