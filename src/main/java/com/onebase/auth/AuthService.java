@@ -12,16 +12,11 @@ import com.onebase.security.AuthPrincipal;
 import com.onebase.security.JwtService;
 import com.onebase.user.User;
 import com.onebase.user.UserRepository;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.Base64;
-import java.util.HexFormat;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -146,7 +141,7 @@ public class AuthService {
 
 	@Transactional
 	public MessageResponse resetPassword(ResetPasswordRequest request) {
-		AuthToken token = tokens.findByTokenHashAndType(sha256(request.token()), AuthToken.Type.PASSWORD_RESET)
+		AuthToken token = tokens.findByTokenHashAndType(OneTimeTokens.hash(request.token()), AuthToken.Type.PASSWORD_RESET)
 			.filter(AuthToken::isUsable)
 			.orElseThrow(() -> ApiException.badRequest("This reset link has expired or was already used. Ask for a new one."));
 
@@ -189,10 +184,8 @@ public class AuthService {
 		}
 		open.forEach(AuthToken::markUsed); // the previous link stops working
 
-		byte[] raw = new byte[32];
-		RANDOM.nextBytes(raw);
-		String token = Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
-		tokens.save(new AuthToken(user, AuthToken.Type.PASSWORD_RESET, sha256(token), now.plus(RESET_LINK_TTL)));
+		String token = OneTimeTokens.generate();
+		tokens.save(new AuthToken(user, AuthToken.Type.PASSWORD_RESET, OneTimeTokens.hash(token), now.plus(RESET_LINK_TTL)));
 		mailService.sendPasswordReset(user.getEmail(), user.getFullName(), frontendUrl + "/reset-password?token=" + token);
 	}
 
@@ -203,15 +196,6 @@ public class AuthService {
 			user.setLockedUntil(Instant.now().plus(LOCK_DURATION));
 			user.setFailedLoginAttempts(0);
 			log.warn("User id={} locked for {} after {} wrong passwords", user.getId(), LOCK_DURATION, attempts);
-		}
-	}
-
-	static String sha256(String value) {
-		try {
-			byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
-			return HexFormat.of().formatHex(digest);
-		} catch (NoSuchAlgorithmException e) {
-			throw new IllegalStateException(e);
 		}
 	}
 

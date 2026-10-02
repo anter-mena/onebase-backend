@@ -35,14 +35,32 @@ import tools.jackson.databind.ObjectMapper;
  * no {@code WWW-Authenticate: Basic} header — that header is what made
  * browsers pop up their grey login box on the site's own pages.
  *
- * <p>Public without a token: the health check, and the three doors into an
- * account — sign in, "forgot password", and setting a new one from the link.
+ * <p>Public without a token: the health check, and the doors into an account —
+ * sign in, "forgot password", setting a new one from the link, and opening or
+ * accepting an invitation.
+ *
+ * <p><b>Roles</b> are read from the database on every request (see
+ * {@code JwtAuthenticationFilter}), so switching someone off takes effect at once.
+ * A COMMERCIAL gets only {@link #COMMERCIAL_API}; everything else needs ADMIN.
  */
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
 
 	private static final String[] DOCS = { "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**" };
+
+	/**
+	 * What a COMMERCIAL may call — mirrors the pages the frontend opens to them
+	 * (lib/access.ts): Clients, Renewals, WhatsApp and the email Inbox, plus their
+	 * own account. Everything not listed here is ADMIN-only.
+	 */
+	static final String[] COMMERCIAL_API = {
+		"/api/auth/**",
+		"/api/clients/**",
+		"/api/renewals/**",
+		"/api/whatsapp/**",
+		"/api/inbox/**",
+	};
 
 	private final ObjectMapper objectMapper;
 
@@ -71,8 +89,14 @@ public class SecurityConfig {
 				.requestMatchers(HttpMethod.POST,
 					"/api/auth/login",
 					"/api/auth/password/forgot",
-					"/api/auth/password/reset").permitAll()
-				.anyRequest().authenticated())
+					"/api/auth/password/reset",
+					"/api/invitations/check",
+					"/api/invitations/accept").permitAll()
+				// Both roles: their own account, and the four areas a Commercial works in.
+				.requestMatchers(COMMERCIAL_API).authenticated()
+				// Everything else — Users, Configuration, Dashboard, SEO, Action log, and any
+				// area added later — is Admin-only until someone deliberately opens it above.
+				.anyRequest().hasRole("ADMIN"))
 			// Stateless API: no session cookie, so no CSRF token to protect.
 			.csrf(csrf -> csrf.disable())
 			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

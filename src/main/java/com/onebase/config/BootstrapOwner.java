@@ -12,7 +12,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 /**
- * Creates the first account — the workspace OWNER — on an empty database.
+ * Creates the first account — an ADMIN — on an empty database.
+ *
+ * <p>The settings keep their original {@code BOOTSTRAP_OWNER_*} names (the server
+ * already has them, and they are read once, ever). Before the switch to two
+ * roles this account was the OWNER; migration V2 made it an ADMIN.
  *
  * <p>The LMS lesson: its first version created accounts with passwords written
  * in the source, and anyone reading the public repo was an administrator. Here
@@ -52,10 +56,10 @@ public class BootstrapOwner implements ApplicationRunner {
 			return;
 		}
 		if (password.length() < 8) {
-			log.error("BOOTSTRAP_OWNER_PASSWORD is shorter than 8 characters — owner not created.");
+			log.error("BOOTSTRAP_OWNER_PASSWORD is shorter than 8 characters — first admin not created.");
 			return;
 		}
-		users.save(new User(name.trim(), email.trim().toLowerCase(), passwordEncoder.encode(password), UserRole.OWNER));
-		log.info("Created the workspace owner {} — the BOOTSTRAP_OWNER_* variables are now ignored.", email.trim().toLowerCase());
+		users.save(new User(name.trim(), email.trim().toLowerCase(), passwordEncoder.encode(password), UserRole.ADMIN));
+		log.info("Created the first admin {} — the BOOTSTRAP_OWNER_* variables are now ignored.", email.trim().toLowerCase());
 	}
 }

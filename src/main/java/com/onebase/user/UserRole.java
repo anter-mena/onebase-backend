@@ -1,14 +1,13 @@
 package com.onebase.user;
 
 /**
- * The three roles the Users screen offers.
+ * The two roles, with fixed privileges (see {@code SecurityConfig} for the rules).
  *
- * <p>OWNER can do everything, ADMIN everything except billing, MANAGER clients
- * and renewals only. There is one OWNER, created by the bootstrap on an empty
- * database; invitations only hand out ADMIN or MANAGER.
+ * <p>ADMIN can do everything; there can be several, and no Admin can ever be
+ * switched off — so there is never zero. COMMERCIAL works with Clients, Renewals,
+ * WhatsApp and the email Inbox, and is refused everything else.
  */
 public enum UserRole {
-	OWNER,
 	ADMIN,
-	MANAGER
+	COMMERCIAL
 }

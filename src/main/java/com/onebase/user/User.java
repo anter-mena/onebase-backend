@@ -84,6 +84,27 @@ public class User {
 		this.role = role;
 	}
 
+	/**
+	 * Someone invited but not arrived yet: no password, can't sign in.
+	 *
+	 * <p>They choose their own name when they accept, so until then the name is
+	 * the part of the email before the "@" — enough for the Users list to show
+	 * something readable.
+	 */
+	public static User invited(String email, UserRole role) {
+		User user = new User(email.substring(0, email.indexOf('@')), email, null, role);
+		user.invitePending = true;
+		return user;
+	}
+
+	/** The invited person has chosen their name and password: they are in. */
+	public void acceptInvitation(String fullName, String passwordHash) {
+		this.fullName = fullName;
+		this.passwordHash = passwordHash;
+		this.invitePending = false;
+		this.active = true;
+	}
+
 	/** Locked out by too many wrong passwords, and the lock has not run out yet. */
 	public boolean isLocked() {
 		return lockedUntil != null && lockedUntil.isAfter(Instant.now());

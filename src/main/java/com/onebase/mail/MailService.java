@@ -9,7 +9,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
 /**
- * Sends the emails auth needs (today: the password-reset link).
+ * Sends the emails auth needs: the password-reset link and the invitation.
  *
  * <p>Spring only creates a {@link JavaMailSender} once {@code SPRING_MAIL_HOST}
  * is set. Until then there is nowhere to send mail, so the link is written to
@@ -44,6 +44,23 @@ public class MailService {
 			If it wasn't you, ignore this email — your password stays the same.
 			""".formatted(name, link);
 		send(to, "Reset your One Base password", body, link);
+	}
+
+	/** The invitation. The inviter's optional message is quoted as they wrote it. */
+	public void sendInvitation(String to, String invitedBy, String roleLabel, String message, String link) {
+		String note = message == null || message.isBlank() ? "" : "\n%s wrote:\n\"%s\"\n".formatted(invitedBy, message.trim());
+		String body = """
+			Hello,
+
+			%s invited you to join One Base as %s.
+			%s
+			Open this link to choose your name and password (it works once, for 7 days):
+
+			%s
+
+			If you weren't expecting this, you can ignore this email.
+			""".formatted(invitedBy, roleLabel, note, link);
+		send(to, "You're invited to One Base", body, link);
 	}
 
 	private void send(String to, String subject, String body, String link) {

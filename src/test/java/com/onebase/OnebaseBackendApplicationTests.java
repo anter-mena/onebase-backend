@@ -82,7 +82,7 @@ class OnebaseBackendApplicationTests {
 		mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.email").value("owner@onebase.test"))
-			.andExpect(jsonPath("$.role").value("OWNER"));
+			.andExpect(jsonPath("$.role").value("ADMIN"));
 	}
 
 	@Test
@@ -193,7 +193,7 @@ class OnebaseBackendApplicationTests {
 	// ── Helpers ──────────────────────────────────────────────────────────
 
 	private User newUser(String email, String password) {
-		return users.save(new User("Test User", email, encoder.encode(password), UserRole.MANAGER));
+		return users.save(new User("Test User", email, encoder.encode(password), UserRole.COMMERCIAL));
 	}
 
 	private void setActive(User user, boolean active) {
