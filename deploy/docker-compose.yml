@@ -24,6 +24,28 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Lets the backend see the containers (System status → Containers) without ever
+  # touching the Docker socket. That socket is root on the host: a web app holding
+  # it turns one bug into the whole machine. This holds it instead, and answers
+  # GET requests about containers only — CONTAINERS=1 is the one permission, and
+  # every write (restart, exec, …) is refused. Same setup as the LMS.
+  # No "ports:" on purpose: only containers on this compose network can reach it.
+  docker-socket-proxy:
+    # Pinned: this guards the Docker socket, so no unreviewed "latest".
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    container_name: onebase-docker-proxy
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    mem_limit: 64m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   backend:
     image: ${BACKEND_IMAGE}
     container_name: onebase-backend
@@ -31,6 +53,19 @@ services:
     # Secrets (Swagger login, DB password, JWT secret…). Lives only on the VPS,
     # never in git: /opt/onebase/backend.env, readable by the deploy user only.
     env_file: backend.env
+    environment:
+      # Not a secret: an address that exists only inside this compose network.
+      - DOCKER_API_URL=http://docker-socket-proxy:2375
+    volumes:
+      # System status → Server. Both read-only, both a single file:
+      # - the machine's OS name (inside the container it would say the image's Linux);
+      # - the machine's network byte counters. /proc/net is per-container, so this
+      #   reads it through PID 1, which lives on the host. Only interface counters —
+      #   not /proc, which would expose every process and its secrets.
+      - /etc/os-release:/host/etc/os-release:ro
+      - /proc/1/net/dev:/host/proc/1/net/dev:ro
+    # Deliberately no depends_on the proxy: it is a panel on a monitoring page, and
+    # a failed pull of it must not stop the app. Unreachable shows as "not connected".
     depends_on:
       db:
         condition: service_healthy

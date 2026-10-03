@@ -164,6 +164,29 @@ class AccountAndActionLogTests {
 		assertThat(users.findById(user.getId()).orElseThrow().getLastActiveAt()).isAfter(hourAgo.plusSeconds(3500));
 	}
 
+	// ── System status ───────────────────────────────────────────────────
+
+	@Test
+	void systemHealthIsForAdminsAndReportsEveryLayer() throws Exception {
+		String admin = login(newUser("health-admin@onebase.test", UserRole.ADMIN).getEmail(), "x");
+		String body = mvc.perform(get("/api/system/health").header("Authorization", "Bearer " + admin))
+			.andExpect(status().isOk())
+			// No Docker proxy in tests: said so, rather than an empty list passed off as "nothing running".
+			.andExpect(jsonPath("$.containers.available").value(false))
+			.andExpect(jsonPath("$.containers.detail").isNotEmpty())
+			.andExpect(jsonPath("$.database.tables[*].name").value(hasItem("users")))
+			.andExpect(jsonPath("$.database.tables[*].name").value(hasItem("action_logs")))
+			.andReturn().getResponse().getContentAsString();
+		for (String figure : new String[] { "$.server.cores", "$.server.memoryTotal", "$.server.diskTotal",
+				"$.backend.heapMax", "$.backend.totalRequests", "$.backend.pool.max", "$.database.sizeBytes" }) {
+			assertThat(JsonPath.<Number>read(body, figure).longValue()).as(figure).isPositive();
+		}
+
+		String commercial = login(newUser("health-commercial@onebase.test", UserRole.COMMERCIAL).getEmail(), "x");
+		mvc.perform(get("/api/system/health").header("Authorization", "Bearer " + commercial)).andExpect(status().isForbidden());
+		mvc.perform(get("/api/system/health")).andExpect(status().isUnauthorized());
+	}
+
 	// ── Helpers ─────────────────────────────────────────────────────────
 
 	private User newUser(String email, UserRole role) {
