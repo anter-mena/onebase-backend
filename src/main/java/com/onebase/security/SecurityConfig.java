@@ -90,6 +90,7 @@ public class SecurityConfig {
 					"/api/auth/login",
 					"/api/auth/password/forgot",
 					"/api/auth/password/reset",
+					"/api/auth/password/reset/check",
 					"/api/invitations/check",
 					"/api/invitations/accept").permitAll()
 				// Both roles: their own account, and the four areas a Commercial works in.

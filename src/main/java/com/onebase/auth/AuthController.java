@@ -64,6 +64,13 @@ public class AuthController {
 		return authService.forgotPassword(request.email());
 	}
 
+	@PostMapping("/password/reset/check")
+	@SecurityRequirements
+	@Operation(summary = "Is a reset link still good?", description = "Returns when it expires; 400 if expired or already used.")
+	public AuthDtos.ResetLinkInfo checkResetLink(@Valid @RequestBody AuthDtos.ResetLinkRequest request) {
+		return authService.checkResetLink(request.token());
+	}
+
 	@PostMapping("/password/reset")
 	@SecurityRequirements
 	@Operation(summary = "Set a new password from the emailed link",

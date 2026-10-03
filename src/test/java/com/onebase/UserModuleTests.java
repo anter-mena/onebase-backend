@@ -101,7 +101,8 @@ class UserModuleTests {
 		mvc.perform(post("/api/invitations/check").contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"" + token + "\"}"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.email").value("new.person@onebase.test"))
-			.andExpect(jsonPath("$.role").value("COMMERCIAL"));
+			.andExpect(jsonPath("$.role").value("COMMERCIAL"))
+			.andExpect(jsonPath("$.expiresAt").isNotEmpty());
 
 		accept(token, "New Person", "chosen-password").andExpect(status().isNoContent());
 		accept(token, "Someone Else", "other-password").andExpect(status().isBadRequest()); // one use only
@@ -220,7 +221,7 @@ class UserModuleTests {
 
 	private String sentInvitationLink(String email) {
 		ArgumentCaptor<String> link = ArgumentCaptor.forClass(String.class);
-		verify(mail, atLeastOnce()).sendInvitation(eq(email), anyString(), anyString(), any(), link.capture());
+		verify(mail, atLeastOnce()).sendInvitation(eq(email), anyString(), any(), any(), link.capture());
 		return link.getValue();
 	}
 

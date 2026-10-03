@@ -53,6 +53,14 @@ public final class AuthDtos {
 	public record MessageResponse(String message) {
 	}
 
+	/** The reset link's token, in the body so it never lands in an access log. */
+	public record ResetLinkRequest(@NotBlank(message = "The reset link is incomplete.") String token) {
+	}
+
+	/** When a reset link stops working — for the countdown on "Choose a new password". */
+	public record ResetLinkInfo(java.time.Instant expiresAt) {
+	}
+
 	/** The signed-in user, as the sidebar and Account settings show them. */
 	public record UserResponse(
 			long id,

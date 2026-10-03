@@ -154,8 +154,9 @@ public class UserService {
 	/** What the "Accept invitation" page shows: who the link is for. */
 	@Transactional(readOnly = true)
 	public InvitationInfo invitationInfo(String token) {
-		User user = usableInvitation(token).getUser();
-		return new InvitationInfo(user.getEmail(), user.getRole());
+		AuthToken invitation = usableInvitation(token);
+		User user = invitation.getUser();
+		return new InvitationInfo(user.getEmail(), user.getRole(), invitation.getExpiresAt());
 	}
 
 	@Transactional
@@ -171,8 +172,7 @@ public class UserService {
 	private void sendInvitation(User user, String invitedBy, String message) {
 		String token = OneTimeTokens.generate();
 		tokens.save(new AuthToken(user, AuthToken.Type.INVITE, OneTimeTokens.hash(token), Instant.now().plus(INVITE_TTL)));
-		String roleLabel = user.getRole() == UserRole.ADMIN ? "an Admin" : "a Commercial";
-		mailService.sendInvitation(user.getEmail(), invitedBy, roleLabel, message, frontendUrl + "/accept-invite?token=" + token);
+		mailService.sendInvitation(user.getEmail(), invitedBy, user.getRole(), message, frontendUrl + "/accept-invite?token=" + token);
 	}
 
 	private User pendingInvite(long userId) {

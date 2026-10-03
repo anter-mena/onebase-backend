@@ -139,6 +139,19 @@ public class AuthService {
 		return new MessageResponse(FORGOT_ANSWER);
 	}
 
+	/**
+	 * Is this reset link still good, and until when? Lets "Choose a new password"
+	 * say so the moment it opens, instead of after someone typed a password.
+	 */
+	@Transactional(readOnly = true)
+	public AuthDtos.ResetLinkInfo checkResetLink(String token) {
+		return tokens.findByTokenHashAndType(OneTimeTokens.hash(token), AuthToken.Type.PASSWORD_RESET)
+			.filter(AuthToken::isUsable)
+			.filter(t -> t.getUser().canSignIn())
+			.map(t -> new AuthDtos.ResetLinkInfo(t.getExpiresAt()))
+			.orElseThrow(() -> ApiException.badRequest("This reset link has expired or was already used. Ask for a new one."));
+	}
+
 	@Transactional
 	public MessageResponse resetPassword(ResetPasswordRequest request) {
 		AuthToken token = tokens.findByTokenHashAndType(OneTimeTokens.hash(request.token()), AuthToken.Type.PASSWORD_RESET)
@@ -186,7 +199,7 @@ public class AuthService {
 
 		String token = OneTimeTokens.generate();
 		tokens.save(new AuthToken(user, AuthToken.Type.PASSWORD_RESET, OneTimeTokens.hash(token), now.plus(RESET_LINK_TTL)));
-		mailService.sendPasswordReset(user.getEmail(), user.getFullName(), frontendUrl + "/reset-password?token=" + token);
+		mailService.sendPasswordReset(user.getEmail(), frontendUrl + "/reset-password?token=" + token);
 	}
 
 	private void registerFailedAttempt(User user) {

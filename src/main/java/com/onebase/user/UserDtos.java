@@ -52,8 +52,8 @@ public final class UserDtos {
 	public record InvitationTokenRequest(@NotBlank(message = "The invitation link is incomplete.") String token) {
 	}
 
-	/** What the "Accept invitation" page shows before the person fills it in. */
-	public record InvitationInfo(String email, UserRole role) {
+	/** What the "Accept invitation" page shows before the person fills it in, and when its link stops working. */
+	public record InvitationInfo(String email, UserRole role, Instant expiresAt) {
 	}
 
 	public record AcceptInvitationRequest(

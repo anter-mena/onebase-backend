@@ -156,12 +156,15 @@ class OnebaseBackendApplicationTests {
 
 		forgot("reset@onebase.test", true);
 		ArgumentCaptor<String> link = ArgumentCaptor.forClass(String.class);
-		verify(mail).sendPasswordReset(eq("reset@onebase.test"), anyString(), link.capture());
+		verify(mail).sendPasswordReset(eq("reset@onebase.test"), link.capture());
 		assertThat(link.getValue()).startsWith("https://app.test/reset-password?token=");
 		String token = link.getValue().substring(link.getValue().indexOf("token=") + 6);
 
+		checkReset(token).andExpect(status().isOk()).andExpect(jsonPath("$.expiresAt").isNotEmpty());
 		reset(token, "new-password").andExpect(status().isOk());
 		reset(token, "another-password").andExpect(status().isBadRequest()); // one use only
+		checkReset(token).andExpect(status().isBadRequest());
+		checkReset("not-a-real-token").andExpect(status().isBadRequest());
 
 		mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + oldSession)).andExpect(status().isUnauthorized());
 		loginRequest("reset@onebase.test", "old-password").andExpect(status().isUnauthorized());
@@ -222,6 +225,11 @@ class OnebaseBackendApplicationTests {
 			.andExpect(status().isOk())
 			.andReturn().getResponse().getContentAsString()
 			.replaceAll("\"timestamp\":\"[^\"]*\",?", "");
+	}
+
+	private ResultActions checkReset(String token) throws Exception {
+		return mvc.perform(post("/api/auth/password/reset/check").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"token\":\"" + token + "\"}"));
 	}
 
 	private ResultActions reset(String token, String newPassword) throws Exception {

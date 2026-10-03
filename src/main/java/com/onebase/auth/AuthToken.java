@@ -69,5 +69,6 @@ public class AuthToken {
 	public User getUser() { return user; }
 	public Type getType() { return type; }
 	public Instant getCreatedAt() { return createdAt; }
+	public Instant getExpiresAt() { return expiresAt; }
 	public void markUsed() { this.usedAt = Instant.now(); }
 }
