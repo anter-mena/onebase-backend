@@ -5,7 +5,11 @@ import com.onebase.auth.AuthDtos.LoginRequest;
 import com.onebase.auth.AuthDtos.LoginResponse;
 import com.onebase.auth.AuthDtos.MessageResponse;
 import com.onebase.auth.AuthDtos.ResetPasswordRequest;
+import com.onebase.auth.AuthDtos.UpdateSettingsRequest;
 import com.onebase.auth.AuthDtos.UserResponse;
+import com.onebase.actionlog.ActionLog.Action;
+import com.onebase.actionlog.ActionLog.TargetType;
+import com.onebase.actionlog.ActionLogService;
 import com.onebase.common.ApiException;
 import com.onebase.mail.MailService;
 import com.onebase.security.AuthPrincipal;
@@ -14,10 +18,15 @@ import com.onebase.user.User;
 import com.onebase.user.UserRepository;
 import java.security.SecureRandom;
 import java.time.Duration;
+import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -48,6 +57,10 @@ public class AuthService {
 	private static final String FORGOT_ANSWER =
 		"If an account exists for this email, a reset link is on its way. Check your inbox.";
 	private static final SecureRandom RANDOM = new SecureRandom();
+	/** What Account settings offers. Anything else is refused rather than stored. */
+	static final Set<String> LANGUAGES = Set.of("en", "fr", "ar");
+	static final Set<String> DATE_FORMATS = Set.of("dd MMM yyyy", "MMM d, yyyy", "yyyy-MM-dd");
+
 	private static final DateTimeFormatter LOCK_TIME = DateTimeFormatter.ofPattern("HH:mm 'UTC'").withZone(ZoneOffset.UTC);
 
 	private final UserRepository users;
@@ -56,19 +69,21 @@ public class AuthService {
 	private final PasswordEncoder passwordEncoder;
 	private final JwtService jwtService;
 	private final MailService mailService;
+	private final ActionLogService actionLog;
 	private final String frontendUrl;
 	/** Hashed once at startup; compared against when the email is unknown, to spend the same time. */
 	private final String dummyHash;
 
 	public AuthService(UserRepository users, SessionRepository sessions, AuthTokenRepository tokens,
 			PasswordEncoder passwordEncoder, JwtService jwtService, MailService mailService,
-			@Value("${onebase.frontend-url}") String frontendUrl) {
+			ActionLogService actionLog, @Value("${onebase.frontend-url}") String frontendUrl) {
 		this.users = users;
 		this.sessions = sessions;
 		this.tokens = tokens;
 		this.passwordEncoder = passwordEncoder;
 		this.jwtService = jwtService;
 		this.mailService = mailService;
+		this.actionLog = actionLog;
 		this.frontendUrl = frontendUrl.replaceAll("/+$", "");
 		this.dummyHash = passwordEncoder.encode("timing-equaliser-" + RANDOM.nextLong());
 	}
@@ -106,7 +121,12 @@ public class AuthService {
 		user.setLastActiveAt(Instant.now());
 
 		Instant expiresAt = Instant.now().plus(jwtService.ttl());
-		Session session = sessions.save(new Session(user, ip, truncate(userAgent, 255), expiresAt));
+		String agent = truncate(userAgent, 255);
+		// Asked before this session is saved, or every browser would look known.
+		boolean newDevice = agent != null && !sessions.existsByUserIdAndUserAgent(user.getId(), agent);
+		Session session = sessions.save(new Session(user, ip, agent, expiresAt));
+		actionLog.record(user, Action.SIGNED_IN, TargetType.WORKSPACE, null, "One Base",
+			newDevice ? "Signed in from a new device" : "Signed in");
 		String token = jwtService.issue(user.getId(), user.getRole().name(), session.getId(), expiresAt);
 		log.info("User id={} signed in (session {})", user.getId(), session.getId());
 		return new LoginResponse(token, "Bearer", jwtService.ttl().toSeconds(), UserResponse.from(user));
@@ -168,6 +188,7 @@ public class AuthService {
 		user.setLockedUntil(null);
 		// Whoever knew the old password is thrown out everywhere.
 		sessions.revokeAll(user.getId(), Instant.now());
+		actionLog.recordUser(user, Action.UPDATED, user, "Reset their password from an email link");
 		log.info("User id={} reset their password", user.getId());
 		return new MessageResponse("Your password has been changed. You can sign in now.");
 	}
@@ -182,8 +203,47 @@ public class AuthService {
 		user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
 		// Every other device is signed out; this one stays in.
 		sessions.revokeAllExcept(user.getId(), principal.sessionId(), Instant.now());
+		actionLog.recordUser(user, Action.UPDATED, user, "Changed their password");
 		log.info("User id={} changed their password", user.getId());
 		return new MessageResponse("Your password has been changed. Other devices have been signed out.");
+	}
+
+	// ── Account settings ────────────────────────────────────────────────────
+
+	@Transactional
+	public UserResponse updateSettings(AuthPrincipal principal, UpdateSettingsRequest request) {
+		User user = users.findById(principal.userId())
+			.orElseThrow(() -> ApiException.unauthorized("Please sign in to continue."));
+		if (!LANGUAGES.contains(request.language())) {
+			throw ApiException.badRequest("Choose one of the languages offered.");
+		}
+		if (!DATE_FORMATS.contains(request.dateFormat())) {
+			throw ApiException.badRequest("Choose one of the date formats offered.");
+		}
+		try {
+			ZoneId.of(request.timeZone());
+		} catch (DateTimeException e) {
+			throw ApiException.badRequest("Choose one of the time zones offered.");
+		}
+
+		List<String> changed = new ArrayList<>();
+		String oldName = user.getFullName();
+		if (!oldName.equals(request.fullName())) changed.add("name from " + oldName + " to " + request.fullName());
+		if (!user.getLanguage().equals(request.language())) changed.add("language");
+		if (!user.getTimeZone().equals(request.timeZone())) changed.add("time zone");
+		if (!user.getDateFormat().equals(request.dateFormat())) changed.add("date format");
+		if (user.isNotifyRenewals() != request.notifyRenewals()
+				|| user.isNotifyFailedPayments() != request.notifyFailedPayments()
+				|| user.isNotifyWeeklyDigest() != request.notifyWeeklyDigest()) {
+			changed.add("email notifications");
+		}
+
+		user.updateSettings(request.fullName(), request.language(), request.timeZone(), request.dateFormat(),
+			request.notifyRenewals(), request.notifyFailedPayments(), request.notifyWeeklyDigest());
+		if (!changed.isEmpty()) {
+			actionLog.recordUser(user, Action.UPDATED, user, "Changed their " + String.join(", ", changed));
+		}
+		return UserResponse.from(user);
 	}
 
 	// ── Helpers ─────────────────────────────────────────────────────────────

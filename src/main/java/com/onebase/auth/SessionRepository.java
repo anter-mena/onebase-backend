@@ -14,6 +14,9 @@ public interface SessionRepository extends JpaRepository<Session, UUID> {
 	@EntityGraph(attributePaths = "user")
 	Optional<Session> findWithUserById(UUID id);
 
+	/** Has this browser signed in to this account before? For "Signed in from a new device". */
+	boolean existsByUserIdAndUserAgent(Long userId, String userAgent);
+
 	/** Ends every open session of a user — after a password reset, nobody should stay signed in. */
 	@Modifying
 	@Query("update Session s set s.revokedAt = :now where s.user.id = :userId and s.revokedAt is null")

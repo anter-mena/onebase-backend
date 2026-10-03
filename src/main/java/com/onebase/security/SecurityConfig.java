@@ -2,6 +2,7 @@ package com.onebase.security;
 
 import com.onebase.auth.SessionRepository;
 import com.onebase.common.ErrorResponse;
+import com.onebase.user.UserRepository;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import org.springframework.beans.factory.annotation.Value;
@@ -82,7 +83,8 @@ public class SecurityConfig {
 
 	@Bean
 	@Order(2)
-	SecurityFilterChain apiChain(HttpSecurity http, JwtService jwtService, SessionRepository sessions) throws Exception {
+	SecurityFilterChain apiChain(HttpSecurity http, JwtService jwtService, SessionRepository sessions,
+			UserRepository users) throws Exception {
 		http
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers("/actuator/health", "/actuator/health/**", "/error").permitAll()
@@ -106,7 +108,7 @@ public class SecurityConfig {
 					"Please sign in to continue.", request.getRequestURI()))
 				.accessDeniedHandler((request, response, e) -> writeError(response, 403, "Forbidden",
 					"You do not have permission to do that.", request.getRequestURI())))
-			.addFilterBefore(new JwtAuthenticationFilter(jwtService, sessions), UsernamePasswordAuthenticationFilter.class);
+			.addFilterBefore(new JwtAuthenticationFilter(jwtService, sessions, users), UsernamePasswordAuthenticationFilter.class);
 		return http.build();
 	}
 

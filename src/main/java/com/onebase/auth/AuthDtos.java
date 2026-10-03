@@ -5,6 +5,7 @@ import com.onebase.user.UserRole;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import java.time.Instant;
 
 /**
  * Everything that crosses the wire for auth, in one place.
@@ -58,7 +59,7 @@ public final class AuthDtos {
 	}
 
 	/** When a reset link stops working — for the countdown on "Choose a new password". */
-	public record ResetLinkInfo(java.time.Instant expiresAt) {
+	public record ResetLinkInfo(Instant expiresAt) {
 	}
 
 	/** The signed-in user, as the sidebar and Account settings show them. */
@@ -69,11 +70,35 @@ public final class AuthDtos {
 			UserRole role,
 			String language,
 			String timeZone,
-			String dateFormat) {
+			String dateFormat,
+			boolean notifyRenewals,
+			boolean notifyFailedPayments,
+			boolean notifyWeeklyDigest,
+			Instant passwordChangedAt) {
 
 		public static UserResponse from(User user) {
 			return new UserResponse(user.getId(), user.getFullName(), user.getEmail(), user.getRole(),
-				user.getLanguage(), user.getTimeZone(), user.getDateFormat());
+				user.getLanguage(), user.getTimeZone(), user.getDateFormat(),
+				user.isNotifyRenewals(), user.isNotifyFailedPayments(), user.isNotifyWeeklyDigest(),
+				user.getPasswordChangedAt());
+		}
+	}
+
+	/**
+	 * Account settings → General. Every field is sent each time (the form saves
+	 * as a whole), so there is no "missing means unchanged" to get wrong.
+	 */
+	public record UpdateSettingsRequest(
+			@NotBlank(message = "Enter your name.") @Size(max = 120, message = "Keep your name under 120 characters.") String fullName,
+			@NotBlank(message = "Choose a language.") String language,
+			@NotBlank(message = "Choose a time zone.") String timeZone,
+			@NotBlank(message = "Choose a date format.") String dateFormat,
+			boolean notifyRenewals,
+			boolean notifyFailedPayments,
+			boolean notifyWeeklyDigest) {
+
+		public UpdateSettingsRequest {
+			fullName = fullName == null ? null : fullName.trim();
 		}
 	}
 }

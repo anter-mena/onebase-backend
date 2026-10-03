@@ -71,6 +71,9 @@ public class User {
 	@Column(name = "last_active_at")
 	private Instant lastActiveAt;
 
+	@Column(name = "password_changed_at")
+	private Instant passwordChangedAt;
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt = Instant.now();
 
@@ -81,6 +84,7 @@ public class User {
 		this.fullName = fullName;
 		this.email = email;
 		this.passwordHash = passwordHash;
+		this.passwordChangedAt = passwordHash == null ? null : Instant.now();
 		this.role = role;
 	}
 
@@ -100,7 +104,7 @@ public class User {
 	/** The invited person has chosen their name and password: they are in. */
 	public void acceptInvitation(String fullName, String passwordHash) {
 		this.fullName = fullName;
-		this.passwordHash = passwordHash;
+		setPasswordHash(passwordHash);
 		this.invitePending = false;
 		this.active = true;
 	}
@@ -119,7 +123,12 @@ public class User {
 	public String getFullName() { return fullName; }
 	public String getEmail() { return email; }
 	public String getPasswordHash() { return passwordHash; }
-	public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
+	/** Also stamps when, for "Last changed …" in Account settings. */
+	public void setPasswordHash(String passwordHash) {
+		this.passwordHash = passwordHash;
+		this.passwordChangedAt = Instant.now();
+	}
+	public Instant getPasswordChangedAt() { return passwordChangedAt; }
 	public UserRole getRole() { return role; }
 	public boolean isActive() { return active; }
 	public void setActive(boolean active) { this.active = active; }
@@ -127,6 +136,21 @@ public class User {
 	public String getLanguage() { return language; }
 	public String getTimeZone() { return timeZone; }
 	public String getDateFormat() { return dateFormat; }
+	public boolean isNotifyRenewals() { return notifyRenewals; }
+	public boolean isNotifyFailedPayments() { return notifyFailedPayments; }
+	public boolean isNotifyWeeklyDigest() { return notifyWeeklyDigest; }
+
+	/** Account settings → General. The email and role are not here: nobody changes their own. */
+	public void updateSettings(String fullName, String language, String timeZone, String dateFormat,
+			boolean notifyRenewals, boolean notifyFailedPayments, boolean notifyWeeklyDigest) {
+		this.fullName = fullName;
+		this.language = language;
+		this.timeZone = timeZone;
+		this.dateFormat = dateFormat;
+		this.notifyRenewals = notifyRenewals;
+		this.notifyFailedPayments = notifyFailedPayments;
+		this.notifyWeeklyDigest = notifyWeeklyDigest;
+	}
 	public int getFailedLoginAttempts() { return failedLoginAttempts; }
 	public void setFailedLoginAttempts(int failedLoginAttempts) { this.failedLoginAttempts = failedLoginAttempts; }
 	public Instant getLockedUntil() { return lockedUntil; }

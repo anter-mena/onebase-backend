@@ -56,8 +56,8 @@ public class UserController {
 
 	@DeleteMapping("/{id}/invitation")
 	@Operation(summary = "Cancel an invitation", description = "Only for someone who has not joined yet.")
-	public ResponseEntity<Void> cancel(@PathVariable long id) {
-		userService.cancelInvitation(id);
+	public ResponseEntity<Void> cancel(@AuthenticationPrincipal AuthPrincipal admin, @PathVariable long id) {
+		userService.cancelInvitation(admin, id);
 		return ResponseEntity.noContent().build();
 	}
 

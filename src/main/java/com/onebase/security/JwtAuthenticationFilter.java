@@ -3,6 +3,9 @@ package com.onebase.security;
 import com.onebase.auth.Session;
 import com.onebase.auth.SessionRepository;
 import com.onebase.user.User;
+import com.onebase.user.UserRepository;
+import java.time.Duration;
+import java.time.Instant;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
@@ -33,12 +36,17 @@ import org.springframework.web.filter.OncePerRequestFilter;
  */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+	/** "Last active" is precise to the minute — enough for a list, and one write a minute at most. */
+	private static final Duration ACTIVITY_STEP = Duration.ofMinutes(1);
+
 	private final JwtService jwtService;
 	private final SessionRepository sessions;
+	private final UserRepository users;
 
-	public JwtAuthenticationFilter(JwtService jwtService, SessionRepository sessions) {
+	public JwtAuthenticationFilter(JwtService jwtService, SessionRepository sessions, UserRepository users) {
 		this.jwtService = jwtService;
 		this.sessions = sessions;
+		this.users = users;
 	}
 
 	@Override
@@ -50,6 +58,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 				var authentication = new UsernamePasswordAuthenticationToken(
 					principal, null, List.of(new SimpleGrantedAuthority("ROLE_" + principal.role().name())));
 				SecurityContextHolder.getContext().setAuthentication(authentication);
+				Instant now = Instant.now();
+				users.touchLastActive(principal.userId(), now, now.minus(ACTIVITY_STEP));
 			});
 		}
 		chain.doFilter(request, response);
