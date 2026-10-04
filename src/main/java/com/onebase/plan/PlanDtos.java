@@ -14,11 +14,12 @@ public final class PlanDtos {
 	private PlanDtos() {
 	}
 
-	/** One price of the grid. */
-	public record PlanResponse(int devices, int months, BigDecimal price, Instant updatedAt) {
+	/** One plan of the grid: its price (Subscriptions), and its cost and panel credit (Expenses). */
+	public record PlanResponse(int devices, int months, BigDecimal price, BigDecimal cost, Integer credits, Instant updatedAt) {
 
 		static PlanResponse from(Plan plan) {
-			return new PlanResponse(plan.getDevices(), plan.getMonths(), plan.getPrice(), plan.getUpdatedAt());
+			return new PlanResponse(plan.getDevices(), plan.getMonths(), plan.getPrice(), plan.getCost(), plan.getCredits(),
+				plan.getUpdatedAt());
 		}
 	}
 
@@ -27,6 +28,21 @@ public final class PlanDtos {
 			@NotNull(message = "Say which plan (devices).") Integer devices,
 			@NotNull(message = "Say which plan (months).") Integer months,
 			@NotNull(message = "Enter a price.") BigDecimal price) {
+	}
+
+	/** One changed cost (Expenses): both numbers of the cell, together. */
+	public record CostChange(
+			@NotNull(message = "Say which plan (devices).") Integer devices,
+			@NotNull(message = "Say which plan (months).") Integer months,
+			@NotNull(message = "Enter a cost.") BigDecimal cost,
+			@NotNull(message = "Enter the credits.") Integer credits) {
+	}
+
+	/** The Expenses Save button: every changed cost, saved together or not at all. */
+	public record SaveCostsRequest(
+			@NotEmpty(message = "Nothing to save.")
+			@Size(max = 16, message = "There are only 16 plans.")
+			List<@Valid CostChange> changes) {
 	}
 
 	/** The Save button: every price changed since the last save, saved together or not at all. */

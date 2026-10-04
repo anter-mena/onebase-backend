@@ -45,6 +45,12 @@ public class Plan {
 	protected Plan() {
 	}
 
+	void setCost(BigDecimal cost, int credits) {
+		this.cost = cost;
+		this.credits = credits;
+		this.updatedAt = Instant.now();
+	}
+
 	void setPrice(BigDecimal price) {
 		this.price = price;
 		this.updatedAt = Instant.now();

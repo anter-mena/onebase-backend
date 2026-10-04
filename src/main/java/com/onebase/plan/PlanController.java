@@ -36,6 +36,14 @@ public class PlanController {
 		return planService.list();
 	}
 
+	@PutMapping("/costs")
+	@Operation(summary = "Save changed costs and credits (Expenses)",
+		description = "All or nothing: one invalid value and none are saved (400). Each changed plan is written to the Action log.")
+	public List<PlanResponse> saveCosts(@AuthenticationPrincipal AuthPrincipal admin,
+			@Valid @RequestBody PlanDtos.SaveCostsRequest request) {
+		return planService.saveCosts(admin, request.changes());
+	}
+
 	@PutMapping("/prices")
 	@Operation(summary = "Save changed prices",
 		description = "All or nothing: one invalid price and none are saved (400). Each change is written to the Action log. "

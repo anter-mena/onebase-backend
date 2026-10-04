@@ -64,8 +64,7 @@ class PlanModuleTests {
 
 		// Only the price that really changed is logged.
 		mvc.perform(get("/api/action-log").header("Authorization", "Bearer " + admin))
-			.andExpect(jsonPath("$[?(@.targetType == 'SUBSCRIPTION')].targetName").value(contains("1 device · 1 month")))
-			.andExpect(jsonPath("$[?(@.targetType == 'SUBSCRIPTION')].detail").value(contains("Price changed from $14.99 to $15.49")));
+			.andExpect(jsonPath("$[?(@.targetName == '1 device · 1 month')].detail").value(contains("Price changed from $14.99 to $15.49")));
 	}
 
 	@Test

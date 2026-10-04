@@ -73,6 +73,52 @@ public class PlanService {
 		return list();
 	}
 
+	/**
+	 * The Expenses Save button: costs and credits, all or nothing, one log line
+	 * per changed plan ("cost $10.00 → $11.00, credits 12 → 13").
+	 */
+	@Transactional
+	public List<PlanResponse> saveCosts(AuthPrincipal admin, List<PlanDtos.CostChange> changes) {
+		User actor = users.findById(admin.userId())
+			.orElseThrow(() -> ApiException.unauthorized("Please sign in to continue."));
+		Set<String> seen = new HashSet<>();
+
+		for (PlanDtos.CostChange change : changes) {
+			String label = label(change.devices(), change.months());
+			if (!seen.add(label)) throw ApiException.badRequest(label + " is in the list twice.");
+			BigDecimal cost = validCost(change.cost(), label);
+			int credits = change.credits();
+			if (credits < 0 || credits > 100_000) throw ApiException.badRequest("The credits of " + label + " must be between 0 and 100000.");
+			Plan plan = plans.findByDevicesAndMonths(change.devices().shortValue(), change.months().shortValue())
+				.orElseThrow(() -> ApiException.badRequest("There is no " + label + " plan."));
+
+			java.util.List<String> parts = new java.util.ArrayList<>();
+			if (plan.getCost() == null || plan.getCost().compareTo(cost) != 0) {
+				parts.add("cost " + (plan.getCost() == null ? "none" : dollars(plan.getCost())) + " → " + dollars(cost));
+			}
+			if (plan.getCredits() == null || plan.getCredits() != credits) {
+				parts.add("credits " + (plan.getCredits() == null ? "none" : plan.getCredits()) + " → " + credits);
+			}
+			if (parts.isEmpty()) continue;
+
+			plan.setCost(cost, credits);
+			actionLog.record(actor, Action.UPDATED, TargetType.SUBSCRIPTION, plan.getId(), label,
+				"Changed " + String.join(", ", parts));
+		}
+		log.info("User id={} saved {} plan cost change(s)", admin.userId(), changes.size());
+		return list();
+	}
+
+	/** 0 or more (a plan can cost nothing), at most two decimals — or 400 naming the plan. */
+	private static BigDecimal validCost(BigDecimal cost, String label) {
+		if (cost.signum() < 0) throw ApiException.badRequest("The cost of " + label + " can't be below $0.");
+		if (cost.stripTrailingZeros().scale() > 2) {
+			throw ApiException.badRequest("The cost of " + label + " can have at most 2 decimals.");
+		}
+		if (cost.compareTo(MAX_PRICE) > 0) throw ApiException.badRequest("The cost of " + label + " is too high.");
+		return cost.setScale(2);
+	}
+
 	/** Above 0, at most two decimals, and a sane ceiling — or 400 naming the plan. */
 	private static BigDecimal validPrice(BigDecimal price, String label) {
 		if (price.signum() <= 0) throw ApiException.badRequest("The price of " + label + " must be above $0.");
