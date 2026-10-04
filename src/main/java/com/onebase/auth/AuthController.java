@@ -58,7 +58,7 @@ public class AuthController {
 
 	@PatchMapping("/me")
 	@Operation(summary = "Save your account settings",
-		description = "Name, language, time zone, date format and email notifications. Not the email or the role.")
+		description = "Name, time zone, date format and email notifications. Not the email or the role.")
 	public UserResponse updateSettings(@AuthenticationPrincipal AuthPrincipal principal,
 			@Valid @RequestBody UpdateSettingsRequest request) {
 		return authService.updateSettings(principal, request);

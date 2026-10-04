@@ -58,7 +58,6 @@ public class AuthService {
 		"If an account exists for this email, a reset link is on its way. Check your inbox.";
 	private static final SecureRandom RANDOM = new SecureRandom();
 	/** What Account settings offers. Anything else is refused rather than stored. */
-	static final Set<String> LANGUAGES = Set.of("en", "fr", "ar");
 	static final Set<String> DATE_FORMATS = Set.of("dd MMM yyyy", "MMM d, yyyy", "yyyy-MM-dd");
 
 	private static final DateTimeFormatter LOCK_TIME = DateTimeFormatter.ofPattern("HH:mm 'UTC'").withZone(ZoneOffset.UTC);
@@ -214,9 +213,6 @@ public class AuthService {
 	public UserResponse updateSettings(AuthPrincipal principal, UpdateSettingsRequest request) {
 		User user = users.findById(principal.userId())
 			.orElseThrow(() -> ApiException.unauthorized("Please sign in to continue."));
-		if (!LANGUAGES.contains(request.language())) {
-			throw ApiException.badRequest("Choose one of the languages offered.");
-		}
 		if (!DATE_FORMATS.contains(request.dateFormat())) {
 			throw ApiException.badRequest("Choose one of the date formats offered.");
 		}
@@ -229,7 +225,6 @@ public class AuthService {
 		List<String> changed = new ArrayList<>();
 		String oldName = user.getFullName();
 		if (!oldName.equals(request.fullName())) changed.add("name from " + oldName + " to " + request.fullName());
-		if (!user.getLanguage().equals(request.language())) changed.add("language");
 		if (!user.getTimeZone().equals(request.timeZone())) changed.add("time zone");
 		if (!user.getDateFormat().equals(request.dateFormat())) changed.add("date format");
 		if (user.isNotifyRenewals() != request.notifyRenewals()
@@ -238,7 +233,7 @@ public class AuthService {
 			changed.add("email notifications");
 		}
 
-		user.updateSettings(request.fullName(), request.language(), request.timeZone(), request.dateFormat(),
+		user.updateSettings(request.fullName(), request.timeZone(), request.dateFormat(),
 			request.notifyRenewals(), request.notifyFailedPayments(), request.notifyWeeklyDigest());
 		if (!changed.isEmpty()) {
 			actionLog.recordUser(user, Action.UPDATED, user, "Changed their " + String.join(", ", changed));

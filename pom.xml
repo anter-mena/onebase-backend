@@ -78,6 +78,13 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-mail</artifactId>
 		</dependency>
+		<!-- Brands: reads a brand website's HTML (name, social links, icon). Parsing only:
+		     the download itself goes through brand.SafeFetcher, never through jsoup. -->
+		<dependency>
+			<groupId>org.jsoup</groupId>
+			<artifactId>jsoup</artifactId>
+			<version>1.21.1</version>
+		</dependency>
 
 		<!-- Sign-in tokens. -->
 		<dependency>

@@ -14,7 +14,7 @@ import java.time.Instant;
  * Someone who can sign in to the workspace (table {@code users}).
  *
  * <p>Only the fields auth needs have behaviour here; the display preferences
- * (language, time zone, notifications) are plain columns the Account settings
+ * (time zone, date format, notifications) are plain columns the Account settings
  * screen will read and write later.
  */
 @Entity
@@ -43,9 +43,6 @@ public class User {
 
 	@Column(name = "invite_pending", nullable = false)
 	private boolean invitePending;
-
-	@Column(nullable = false)
-	private String language = "en";
 
 	@Column(name = "time_zone", nullable = false)
 	private String timeZone = "UTC";
@@ -133,7 +130,6 @@ public class User {
 	public boolean isActive() { return active; }
 	public void setActive(boolean active) { this.active = active; }
 	public boolean isInvitePending() { return invitePending; }
-	public String getLanguage() { return language; }
 	public String getTimeZone() { return timeZone; }
 	public String getDateFormat() { return dateFormat; }
 	public boolean isNotifyRenewals() { return notifyRenewals; }
@@ -141,10 +137,9 @@ public class User {
 	public boolean isNotifyWeeklyDigest() { return notifyWeeklyDigest; }
 
 	/** Account settings → General. The email and role are not here: nobody changes their own. */
-	public void updateSettings(String fullName, String language, String timeZone, String dateFormat,
+	public void updateSettings(String fullName, String timeZone, String dateFormat,
 			boolean notifyRenewals, boolean notifyFailedPayments, boolean notifyWeeklyDigest) {
 		this.fullName = fullName;
-		this.language = language;
 		this.timeZone = timeZone;
 		this.dateFormat = dateFormat;
 		this.notifyRenewals = notifyRenewals;

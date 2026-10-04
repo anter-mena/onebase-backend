@@ -95,6 +95,11 @@ public class SecurityConfig {
 					"/api/auth/password/reset/check",
 					"/api/invitations/check",
 					"/api/invitations/accept").permitAll()
+				// A brand's logo is no secret, and the browser loads it as a plain image (no token to send).
+				.requestMatchers(HttpMethod.GET, "/api/brands/*/logo").permitAll()
+				// Reading the brand list: both roles (Commercials pick a brand for clients and payments).
+				// Adding, editing and switching brands fall through to Admin-only below.
+				.requestMatchers(HttpMethod.GET, "/api/brands").authenticated()
 				// Both roles: their own account, and the four areas a Commercial works in.
 				.requestMatchers(COMMERCIAL_API).authenticated()
 				// Everything else — Users, Configuration, Dashboard, SEO, Action log, and any

@@ -107,26 +107,25 @@ class AccountAndActionLogTests {
 		User user = newUser("settings@onebase.test", UserRole.COMMERCIAL);
 		String token = login("settings@onebase.test", "x");
 
-		settings(token, "  New Name ", "fr", "Africa/Casablanca", "yyyy-MM-dd", false)
+		settings(token, "  New Name ", "Africa/Casablanca", "yyyy-MM-dd", false)
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.fullName").value("New Name"));
 		mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
 			.andExpect(jsonPath("$.fullName").value("New Name"))
-			.andExpect(jsonPath("$.language").value("fr"))
+			.andExpect(jsonPath("$.language").doesNotExist())
 			.andExpect(jsonPath("$.timeZone").value("Africa/Casablanca"))
 			.andExpect(jsonPath("$.dateFormat").value("yyyy-MM-dd"))
 			.andExpect(jsonPath("$.notifyRenewals").value(false))
 			.andExpect(jsonPath("$.email").value("settings@onebase.test"));
 
-		settings(token, "New Name", "de", "UTC", "yyyy-MM-dd", true).andExpect(status().isBadRequest());
-		settings(token, "New Name", "en", "Mars/Olympus", "yyyy-MM-dd", true).andExpect(status().isBadRequest());
-		settings(token, "New Name", "en", "UTC", "whatever", true).andExpect(status().isBadRequest());
-		settings(token, " ", "en", "UTC", "yyyy-MM-dd", true).andExpect(status().isBadRequest());
+		settings(token, "New Name", "Mars/Olympus", "yyyy-MM-dd", true).andExpect(status().isBadRequest());
+		settings(token, "New Name", "UTC", "whatever", true).andExpect(status().isBadRequest());
+		settings(token, " ", "UTC", "yyyy-MM-dd", true).andExpect(status().isBadRequest());
 
 		String admin = login(newUser("settings-admin@onebase.test", UserRole.ADMIN).getEmail(), "x");
 		mvc.perform(get("/api/action-log").header("Authorization", "Bearer " + admin))
 			.andExpect(jsonPath("$[?(@.userId == " + user.getId() + " && @.action == 'UPDATED')].detail")
-				.value(contains("Changed their name from Test User to New Name, language, time zone, date format, email notifications")));
+				.value(contains("Changed their name from Test User to New Name, time zone, date format, email notifications")));
 	}
 
 	@Test
@@ -207,13 +206,13 @@ class AccountAndActionLogTests {
 		return mvc.perform(get("/api/action-log").header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
 	}
 
-	private ResultActions settings(String token, String name, String language, String timeZone, String dateFormat,
+	private ResultActions settings(String token, String name, String timeZone, String dateFormat,
 			boolean renewals) throws Exception {
 		return mvc.perform(patch("/api/auth/me").header("Authorization", "Bearer " + token)
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("""
-				{"fullName":"%s","language":"%s","timeZone":"%s","dateFormat":"%s",
+				{"fullName":"%s","timeZone":"%s","dateFormat":"%s",
 				 "notifyRenewals":%s,"notifyFailedPayments":true,"notifyWeeklyDigest":true}
-				""".formatted(name, language, timeZone, dateFormat, renewals)));
+				""".formatted(name, timeZone, dateFormat, renewals)));
 	}
 }

@@ -68,7 +68,6 @@ public final class AuthDtos {
 			String fullName,
 			String email,
 			UserRole role,
-			String language,
 			String timeZone,
 			String dateFormat,
 			boolean notifyRenewals,
@@ -78,7 +77,7 @@ public final class AuthDtos {
 
 		public static UserResponse from(User user) {
 			return new UserResponse(user.getId(), user.getFullName(), user.getEmail(), user.getRole(),
-				user.getLanguage(), user.getTimeZone(), user.getDateFormat(),
+				user.getTimeZone(), user.getDateFormat(),
 				user.isNotifyRenewals(), user.isNotifyFailedPayments(), user.isNotifyWeeklyDigest(),
 				user.getPasswordChangedAt());
 		}
@@ -90,7 +89,6 @@ public final class AuthDtos {
 	 */
 	public record UpdateSettingsRequest(
 			@NotBlank(message = "Enter your name.") @Size(max = 120, message = "Keep your name under 120 characters.") String fullName,
-			@NotBlank(message = "Choose a language.") String language,
 			@NotBlank(message = "Choose a time zone.") String timeZone,
 			@NotBlank(message = "Choose a date format.") String dateFormat,
 			boolean notifyRenewals,

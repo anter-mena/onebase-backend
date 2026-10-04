@@ -17,4 +17,5 @@ RUN groupadd --system app && useradd --system --gid app app
 COPY --from=build /app/target/*.jar app.jar
 USER app
 EXPOSE 8080
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]
+# headless: brand logos are resized with Java's image tools, which must never look for a screen.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-Djava.awt.headless=true", "-jar", "app.jar"]
