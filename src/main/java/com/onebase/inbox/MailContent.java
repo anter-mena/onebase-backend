@@ -37,13 +37,32 @@ final class MailContent {
 
 	record Parsed(String text, List<Attachment> attachments) {
 
+		/** The new words only: the quoted original of a reply ("> …" and its "… wrote:" line) is left out. */
 		String snippet() {
-			String flat = text.replaceAll("\\s+", " ").trim();
+			String flat = withoutQuote(text).replaceAll("\\s+", " ").trim();
+			if (flat.isEmpty()) flat = text.replaceAll("\\s+", " ").trim();
 			return flat.length() > 200 ? flat.substring(0, 200) : flat;
 		}
 	}
 
 	private MailContent() {
+	}
+
+	/** "On … wrote:" in English, "Le … a écrit :" from a French Gmail. */
+	static boolean isQuoteHeader(String line) {
+		return line.matches("(?i)^\\s*(on|le)\\s.+(wrote|a écrit)\\s*:\\s*$");
+	}
+
+	static String withoutQuote(String text) {
+		StringBuilder out = new StringBuilder();
+		String[] lines = text.split("\n", -1);
+		for (int i = 0; i < lines.length; i++) {
+			String line = lines[i];
+			if (line.startsWith(">")) continue;
+			if (isQuoteHeader(line) && i + 1 < lines.length && (lines[i + 1].startsWith(">") || lines[i + 1].isBlank())) continue;
+			out.append(line).append('\n');
+		}
+		return out.toString();
 	}
 
 	static Parsed parse(Part message) throws MessagingException, IOException {

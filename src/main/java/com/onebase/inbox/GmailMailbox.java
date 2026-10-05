@@ -95,6 +95,8 @@ public class GmailMailbox {
 			boolean read,
 			boolean starred,
 			List<String> labels,
+			/** Gmail filed it under Sent: it went out from this mailbox (a reply, or a website form email). */
+			boolean sentByUs,
 			MailContent.Parsed content,
 			String messageIdHeader,
 			String inReplyTo,
@@ -472,6 +474,7 @@ public class GmailMailbox {
 			m.isSet(Flags.Flag.SEEN),
 			m.isSet(Flags.Flag.FLAGGED),
 			userLabels(m.getLabels()),
+			Arrays.asList(m.getLabels() == null ? new String[0] : m.getLabels()).contains("\\Sent"),
 			content,
 			m.getMessageID(),
 			firstHeader(m, "In-Reply-To"),

@@ -67,12 +67,16 @@ public class InboxService {
 	private final GmailMailbox mailbox;
 	private final InboxSettings settings;
 	private final BrandRepository brands;
+	private final String frontendUrl;
 	private volatile JavaMailSenderImpl smtp;
 
-	public InboxService(GmailMailbox mailbox, InboxSettings settings, BrandRepository brands) {
+	public InboxService(GmailMailbox mailbox, InboxSettings settings, BrandRepository brands,
+			@org.springframework.beans.factory.annotation.Value("${onebase.frontend-url}") String frontendUrl) {
 		this.mailbox = mailbox;
 		this.settings = settings;
 		this.brands = brands;
+		// Brand logos are served (publicly) through the frontend's https address, so mail apps load them.
+		this.frontendUrl = frontendUrl.replaceAll("/+$", "");
 	}
 
 	// ── Reading ───────────────────────────────────────────────────────────────
@@ -101,7 +105,19 @@ public class InboxService {
 		if (q != null && !q.isBlank()) parts.add(q.trim());
 		int size = limit == null ? DEFAULT_LIMIT : Math.max(1, Math.min(MAX_LIMIT, limit));
 		List<BrandMatch> matches = brandMatches();
-		return mailbox.list(key, String.join(" ", parts), size).stream().map(s -> summary(s, matches)).toList();
+		if (key != FolderKey.INBOX) {
+			return mailbox.list(key, String.join(" ", parts), size).stream().map(s -> summary(s, matches)).toList();
+		}
+		// Gmail puts our reply in the Inbox too, because its conversation is there. An email we
+		// sent to someone outside belongs in Sent only; a website form email is sent to our own
+		// support@ address, so it stays.
+		Set<String> ours = new LinkedHashSet<>();
+		senders(matches).forEach(sender -> ours.add(sender.email()));
+		return mailbox.list(key, String.join(" ", parts), Math.min(MAX_LIMIT + 50, size + 50)).stream()
+			.filter(s -> !s.sentByUs() || concat(s.to(), s.cc()).stream().anyMatch(a -> ours.contains(a.email())))
+			.limit(size)
+			.map(s -> summary(s, matches))
+			.toList();
 	}
 
 	public MailDetail detail(String folder, String id, boolean markRead) {
@@ -201,7 +217,8 @@ public class InboxService {
 
 	private Prepared prepare(ComposeRequest request, List<MultipartFile> uploads, boolean sending) {
 		if (request == null) throw ApiException.badRequest("The email is empty.");
-		List<SenderView> senders = senders(brandMatches());
+		List<BrandMatch> matches = brandMatches();
+		List<SenderView> senders = senders(matches);
 		SenderView from = senders.stream()
 			.filter(s -> s.email().equalsIgnoreCase(request.from() == null ? "" : request.from().trim()))
 			.findFirst()
@@ -275,7 +292,8 @@ public class InboxService {
 		} catch (UnsupportedEncodingException e) {
 			throw ApiException.badRequest("The From address is not valid.");
 		}
-		return new Prepared(new Outgoing(fromAddress, to, cc, subject, body, inReplyTo, references, files), draftId);
+		return new Prepared(new Outgoing(fromAddress, to, cc, subject, body, inReplyTo, references, files,
+			branding(from, matches)), draftId);
 	}
 
 	// ── Brands and senders ─────────────────────────────────────────────────────
@@ -303,6 +321,17 @@ public class InboxService {
 			result.add(new BrandMatch(label, match, sender));
 		}
 		return result;
+	}
+
+	/** The design of an email from this address: its brand, or the mailbox's own name. */
+	private MailComposer.Branding branding(SenderView from, List<BrandMatch> matches) {
+		for (BrandMatch m : matches) {
+			if (m.sender() != null && m.brand() != null && m.sender().email().equalsIgnoreCase(from.email())) {
+				String logo = logoUrl(m.brand());
+				return new MailComposer.Branding(m.brand().getName(), m.brand().getDomain(), logo == null ? null : frontendUrl + logo);
+			}
+		}
+		return new MailComposer.Branding(settings.displayName(), null, null);
 	}
 
 	private List<SenderView> senders(List<BrandMatch> matches) {

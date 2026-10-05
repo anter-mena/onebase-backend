@@ -36,6 +36,13 @@ final class MailComposer {
 	record FileData(String name, String contentType, byte[] bytes) {
 	}
 
+	/**
+	 * Who the email is from, for its design: the brand's name, website and logo (an
+	 * absolute https address, so mail apps can load it). Website and logo may be null.
+	 */
+	record Branding(String name, String website, String logoUrl) {
+	}
+
 	record Outgoing(
 			InternetAddress from,
 			List<InternetAddress> to,
@@ -44,7 +51,8 @@ final class MailComposer {
 			String body,
 			String inReplyTo,
 			String references,
-			List<FileData> files) {
+			List<FileData> files,
+			Branding branding) {
 	}
 
 	private MailComposer() {
@@ -65,12 +73,21 @@ final class MailComposer {
 		if (mail.references() != null && !mail.references().isBlank()) {
 			message.setHeader("References", mail.references());
 		}
+		// Plain text for every mail app, and the same words as HTML so the quoted original shows
+		// as a grey quote block (no "> " at the start of each line) where HTML is shown.
+		MimeMultipart alternative = new MimeMultipart("alternative");
+		MimeBodyPart plain = new MimeBodyPart();
+		plain.setText(mail.body(), "UTF-8");
+		alternative.addBodyPart(plain);
+		MimeBodyPart html = new MimeBodyPart();
+		html.setText(branded(toHtml(mail.body()), mail.branding()), "UTF-8", "html");
+		alternative.addBodyPart(html);
 		if (mail.files().isEmpty()) {
-			message.setText(mail.body(), "UTF-8");
+			message.setContent(alternative);
 		} else {
 			MimeMultipart mixed = new MimeMultipart("mixed");
 			MimeBodyPart text = new MimeBodyPart();
-			text.setText(mail.body(), "UTF-8");
+			text.setContent(alternative);
 			mixed.addBodyPart(text);
 			for (FileData file : mail.files()) {
 				MimeBodyPart part = new MimeBodyPart();
@@ -88,6 +105,86 @@ final class MailComposer {
 		}
 		message.saveChanges();
 		return message;
+	}
+
+	/**
+	 * Plain text → simple HTML: escaped, line breaks kept, and each run of "> " lines a
+	 * blockquote (nested for "> > "), styled like Gmail's own quotes.
+	 */
+	static String toHtml(String text) {
+		StringBuilder out = new StringBuilder("<div dir=\"auto\" style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">");
+		int depth = 0;
+		for (String line : (text == null ? "" : text).split("\n", -1)) {
+			int level = 0;
+			String rest = line;
+			while (rest.startsWith(">")) {
+				level++;
+				rest = rest.substring(1);
+				if (rest.startsWith(" ")) rest = rest.substring(1);
+			}
+			while (depth < level) {
+				out.append("<blockquote class=\"gmail_quote\" style=\"margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex;color:#555;\">");
+				depth++;
+			}
+			while (depth > level) {
+				out.append("</blockquote>");
+				depth--;
+			}
+			out.append(escapeHtml(rest)).append("<br>");
+		}
+		while (depth-- > 0) out.append("</blockquote>");
+		return out.append("</div>").toString();
+	}
+
+	/**
+	 * The words inside the same design as the One Base invitation and the website contact
+	 * emails: the brand's logo on top, one white card, a small grey footer.
+	 */
+	static String branded(String bodyHtml, Branding brand) {
+		String name = brand == null || brand.name() == null ? "" : brand.name();
+		String logo;
+		if (brand != null && brand.logoUrl() != null) {
+			logo = "<img src=\"" + escapeHtml(brand.logoUrl()) + "\" width=\"40\" height=\"40\" alt=\"" + escapeHtml(name)
+				+ "\" style=\"display:block;width:40px;height:40px;border:0;outline:none;text-decoration:none;\">";
+		} else if (!name.isBlank()) {
+			// No logo: the name, set in text, shows in every mail app with images on or off.
+			logo = "<table role=\"presentation\" align=\"center\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>"
+				+ "<td style=\"background:#0a0a0a;border-radius:8px;padding:9px 12px;font-size:14px;line-height:1;font-weight:800;color:#ffffff;\">"
+				+ escapeHtml(name) + "</td></tr></table>";
+		} else {
+			logo = "";
+		}
+		String site = brand == null || brand.website() == null ? null : brand.website();
+		String footer = "&copy; " + java.time.Year.now(java.time.ZoneOffset.UTC) + (name.isBlank() ? "" : " " + escapeHtml(name))
+			+ (site == null ? "" : " &middot; <a href=\"https://" + escapeHtml(site) + "\" style=\"color:#71717a;text-decoration:underline;\">"
+				+ escapeHtml(site) + "</a>");
+		return """
+			<!doctype html>
+			<html lang="en">
+			<head>
+			  <meta charset="utf-8">
+			  <meta name="viewport" content="width=device-width, initial-scale=1">
+			  <meta name="color-scheme" content="light">
+			</head>
+			<body style="margin:0;padding:0;background:#f4f4f5;color:#202124;font-family:Arial,Helvetica,sans-serif;">
+			  <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f4f5;">
+			    <tr><td align="center" style="padding:24px 16px;">
+			      <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
+			        %s
+			        <tr><td style="background:#ffffff;border:1px solid #e4e4e7;padding:28px 28px;text-align:left;">
+			          %s
+			        </td></tr>
+			        <tr><td style="padding:16px 8px 0 8px;text-align:center;font-size:11px;line-height:1.6;color:#71717a;">%s</td></tr>
+			      </table>
+			    </td></tr>
+			  </table>
+			</body>
+			</html>
+			""".formatted(logo.isEmpty() ? "" : "<tr><td align=\"center\" style=\"padding:0 0 20px 0;\">" + logo + "</td></tr>", bodyHtml, footer);
+	}
+
+	private static String escapeHtml(String value) {
+		return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
 	}
 
 	static String replySubject(String subject) {

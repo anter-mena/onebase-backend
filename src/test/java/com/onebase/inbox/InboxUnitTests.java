@@ -108,7 +108,7 @@ class InboxUnitTests {
 			new InternetAddress("support@easyiptv.ca", "EasyIPTV Support", "UTF-8"),
 			List.of(new InternetAddress("jane@example.com")), List.of(),
 			"Re: Help", "Hello Jane", "<b@easyiptv.ca>", "<a@example.com> <b@easyiptv.ca>",
-			List.of(new FileData("guide é.pdf", "application/pdf", "PDF".getBytes(StandardCharsets.UTF_8)))));
+			List.of(new FileData("guide é.pdf", "application/pdf", "PDF".getBytes(StandardCharsets.UTF_8))), null));
 
 		assertThat(built.getHeader("In-Reply-To")[0]).isEqualTo("<b@easyiptv.ca>");
 		assertThat(built.getHeader("References")[0]).isEqualTo("<a@example.com> <b@easyiptv.ca>");
@@ -141,7 +141,7 @@ class InboxUnitTests {
 		Fixture f = new Fixture();
 		Snapshot form = new Snapshot(11, FolderKey.INBOX, "EasyIPTV Contact", "support@easyiptv.ca",
 			List.of(new Addr("", "support@easyiptv.ca")), List.of(), List.of(new Addr("", "jane@example.com")), List.of(),
-			"[EasyIPTV] New message", Instant.parse("2026-10-05T13:24:00Z"), false, false, List.of("EasyIPTV"),
+			"[EasyIPTV] New message", Instant.parse("2026-10-05T13:24:00Z"), false, false, List.of("EasyIPTV"), true,
 			new MailContent.Parsed("Hi", List.of()), "<x@easyiptv.ca>", null, null);
 		when(f.mailbox.get(FolderKey.INBOX, 11)).thenReturn(form);
 
@@ -160,7 +160,7 @@ class InboxUnitTests {
 		Fixture f = new Fixture();
 		Snapshot direct = new Snapshot(12, FolderKey.INBOX, "Jane", "jane@example.com",
 			List.of(new Addr("", "sales@easyiptv.ca")), List.of(new Addr("Bob", "bob@example.com")), List.of(), List.of(),
-			"Price?", Instant.parse("2026-10-05T13:24:00Z"), true, false, List.of(),
+			"Price?", Instant.parse("2026-10-05T13:24:00Z"), true, false, List.of(), false,
 			new MailContent.Parsed("How much?", List.of()), "<y@example.com>", null, null);
 		when(f.mailbox.get(FolderKey.INBOX, 12)).thenReturn(direct);
 
@@ -194,7 +194,64 @@ class InboxUnitTests {
 	void aBrandFilterBecomesAGmailLabelSearch() {
 		Fixture f = new Fixture();
 		f.service.list("inbox", "invoice", true, "Easy IPTV", 500);
-		verify(f.mailbox).list(FolderKey.INBOX, "label:Easy-IPTV is:unread invoice", InboxService.MAX_LIMIT);
+		// The Inbox asks for 50 more, to make up for our own answers it leaves out.
+		verify(f.mailbox).list(FolderKey.INBOX, "label:Easy-IPTV is:unread invoice", InboxService.MAX_LIMIT + 50);
+		f.service.list("sent", null, false, null, 30);
+		verify(f.mailbox).list(FolderKey.SENT, "", 30);
+	}
+
+	@Test
+	void theInboxLeavesOutOurAnswersButKeepsWebsiteFormEmails() {
+		Fixture f = new Fixture();
+		Snapshot form = new Snapshot(21, FolderKey.INBOX, "EasyIPTV Contact", "support@easyiptv.ca",
+			List.of(new Addr("", "support@easyiptv.ca")), List.of(), List.of(new Addr("", "jane@example.com")), List.of(),
+			"[EasyIPTV] New message", Instant.parse("2026-10-05T13:24:00Z"), true, false, List.of("EasyIPTV"), true,
+			new MailContent.Parsed("Hi", List.of()), "<f@easyiptv.ca>", null, null);
+		Snapshot ourReply = new Snapshot(22, FolderKey.INBOX, "EasyIPTV Support", "support@easyiptv.ca",
+			List.of(new Addr("", "jane@example.com")), List.of(), List.of(), List.of(),
+			"Re: [EasyIPTV] New message", Instant.parse("2026-10-05T13:30:00Z"), true, false, List.of("EasyIPTV"), true,
+			new MailContent.Parsed("Thanks", List.of()), "<r@easyiptv.ca>", null, null);
+		Snapshot client = new Snapshot(23, FolderKey.INBOX, "Jane", "jane@example.com",
+			List.of(new Addr("", "support@easyiptv.ca")), List.of(), List.of(), List.of(),
+			"Re: Re: [EasyIPTV] New message", Instant.parse("2026-10-05T13:40:00Z"), false, false, List.of("EasyIPTV"), false,
+			new MailContent.Parsed("Great", List.of()), "<c@example.com>", null, null);
+		when(f.mailbox.list(eq(FolderKey.INBOX), eq(""), anyInt())).thenReturn(List.of(client, ourReply, form));
+
+		assertThat(f.service.list("inbox", null, false, null, null)).extracting(InboxDtos.MailSummary::id)
+			.containsExactly("23", "21");
+	}
+
+	@Test
+	void quotesBecomeAQuoteBlockInTheHtmlVersionAndStayOutOfThePreview() throws Exception {
+		String body = "Thanks!\n\nOn Mon 5 Oct 2026 at 13:24 UTC, Jane <jane@example.com> wrote:\n> Hello <team>\n> > older\n";
+
+		assertThat(MailComposer.toHtml(body))
+			.contains("Thanks!<br>")
+			.contains("<blockquote")
+			.contains("Hello &lt;team&gt;<br><blockquote")
+			.doesNotContain("&gt; Hello");
+		assertThat(new MailContent.Parsed(body, List.of()).snippet()).isEqualTo("Thanks!");
+		assertThat(new MailContent.Parsed("Merci\n\nLe lun. 5 oct. 2026 à 13:22, X <x@y.ca> a écrit :\n> Bonjour", List.of()).snippet())
+			.isEqualTo("Merci");
+
+		MimeMessage built = MailComposer.build(SESSION, new Outgoing(new InternetAddress("support@easyiptv.ca"),
+			List.of(new InternetAddress("jane@example.com")), List.of(), "Re: Hi", body, null, null, List.of(), null));
+		// The plain text is still what One Base shows; the HTML version is for the client's mail app.
+		assertThat(MailContent.parse(built).text()).startsWith("Thanks!").contains("> Hello <team>");
+		assertThat(((MimeMultipart) built.getContent()).getContentType()).startsWith("multipart/alternative");
+	}
+
+	@Test
+	void anEmailFromABrandUsesTheBrandDesign() {
+		String html = MailComposer.branded(MailComposer.toHtml("Hello <Jane>"),
+			new MailComposer.Branding("Easy IPTV", "easyiptv.ca", "https://app.test/api/brands/7/logo?v=1"));
+		assertThat(html)
+			.contains("<img src=\"https://app.test/api/brands/7/logo?v=1\"")
+			.contains("Hello &lt;Jane&gt;")
+			.contains("Easy IPTV &middot; <a href=\"https://easyiptv.ca\"");
+		// No logo yet: the brand name in a black badge instead.
+		assertThat(MailComposer.branded("x", new MailComposer.Branding("IPTV NOW", "iptvnow.ca", null)))
+			.contains(">IPTV NOW</td>").doesNotContain("<img");
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────
@@ -215,7 +272,7 @@ class InboxUnitTests {
 			when(mailbox.userLabels()).thenReturn(List.of("EasyIPTV", "Personal"));
 			InboxSettings settings = new InboxSettings("jamie.responde@gmail.com", "abcd efgh", "Jamie Responder",
 				"imap.gmail.com", 993, "smtp.gmail.com", 465, "support");
-			service = new InboxService(mailbox, settings, brands);
+			service = new InboxService(mailbox, settings, brands, "https://app.test/");
 		}
 	}
 
@@ -229,7 +286,7 @@ class InboxUnitTests {
 
 	private static Snapshot snapshot(String from, List<Addr> to, String text, String subject, List<String> labels) {
 		return new Snapshot(1, FolderKey.INBOX, "EasyIPTV Contact", from, to, List.of(), List.of(), List.of(), subject,
-			Instant.parse("2026-10-05T13:24:00Z"), true, false, labels, new MailContent.Parsed(text, List.of()),
+			Instant.parse("2026-10-05T13:24:00Z"), true, false, labels, false, new MailContent.Parsed(text, List.of()),
 			"<b@easyiptv.ca>", "<a@example.com>", "<a@example.com>");
 	}
 
