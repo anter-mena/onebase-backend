@@ -78,6 +78,16 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-mail</artifactId>
 		</dependency>
+		<!-- Inbox: the Gmail IMAP extensions (labels, message ids, Gmail search). Same release as the mail library above. -->
+		<dependency>
+			<groupId>org.eclipse.angus</groupId>
+			<artifactId>gimap</artifactId>
+			<version>${angus-mail.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.eclipse.angus</groupId>
+			<artifactId>angus-mail</artifactId>
+		</dependency>
 		<!-- Brands: reads a brand website's HTML (name, social links, icon). Parsing only:
 		     the download itself goes through brand.SafeFetcher, never through jsoup. -->
 		<dependency>
