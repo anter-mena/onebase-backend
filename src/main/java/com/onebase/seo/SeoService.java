@@ -25,10 +25,11 @@ import tools.jackson.databind.node.ObjectNode;
  * and range), so opening the page again or switching back and forth costs nothing,
  * and the GA4 quota is never near its limit.
  *
- * <p>"Organic" is GA4's own channel grouping: {@code sessionDefaultChannelGroup =
- * "Organic Search"}. The channel mix is the one report that is not filtered, since
- * it puts organic next to everything else. Complete days only (up to yesterday),
- * compared with the period just before.
+ * <p><b>Every visitor, like the GA4 home page</b> (decided 2026-10-05): sessions, users,
+ * engagement, the chart, countries, devices and landing pages count all traffic. The
+ * search engines are organic by nature ({@code sessionDefaultChannelGroup = "Organic
+ * Search"}); the chart and the totals also carry organic and direct separately, for
+ * the chart's All / Organic / Direct tabs. Compared with the period just before.
  */
 @Service
 public class SeoService {
@@ -39,12 +40,18 @@ public class SeoService {
 	public record SeoBrand(long id, String name, String logoUrl, String propertyId) {
 	}
 
-	public record TrafficPoint(String start, long sessions, long users) {
+	/** Every visitor, and the ones from search (organic) and typed-in or bookmarked (direct), for the chart's tabs. */
+	public record TrafficPoint(String start, long sessions, long users, long organicSessions, long organicUsers,
+			long directSessions, long directUsers) {
+	}
+
+	public record ChannelTotals(long sessions, long previousSessions, long users, long previousUsers) {
 	}
 
 	public record Totals(long sessions, long previousSessions, long users, long previousUsers,
 			double engagementRate, double previousEngagementRate, long keyEvents, long previousKeyEvents,
-			double averageEngagementSeconds, double previousAverageEngagementSeconds) {
+			double averageEngagementSeconds, double previousAverageEngagementSeconds,
+			ChannelTotals organic, ChannelTotals direct) {
 	}
 
 	public record Channel(String channel, long sessions) {
@@ -56,7 +63,8 @@ public class SeoService {
 	public record Engine(String source, long sessions) {
 	}
 
-	public record Country(String country, String countryId, long sessions) {
+	/** {@code sessions}: every visitor (like the GA4 home page); {@code organicSessions}: the ones from search. */
+	public record Country(String country, String countryId, long sessions, long organicSessions) {
 	}
 
 	public record Device(String device, long sessions) {
@@ -123,77 +131,97 @@ public class SeoService {
 		String property = brand.getGa4PropertyId();
 
 		List<JsonNode> first = ga4.batch(property, List.of(
-			report(List.of(stepDimension), List.of("sessions", "totalUsers"), only(current), true, null, null),
+			report(List.of(stepDimension), List.of("sessions", "totalUsers"), only(current), ALL, null, null),
+			report(List.of(stepDimension, "sessionDefaultChannelGroup"), List.of("sessions", "totalUsers"), only(current), ORGANIC_AND_DIRECT, null, null),
 			report(List.of(), List.of("sessions", "totalUsers", "engagementRate", "keyEvents", "userEngagementDuration", "activeUsers"),
-				List.of(current, previous), true, null, null),
-			report(List.of("sessionDefaultChannelGroup"), List.of("sessions"), only(current), false, "sessions", 8),
-			report(List.of("landingPage"), List.of("sessions", "engagementRate", "keyEvents"), only(current), true, "sessions", 5),
-			report(List.of("sessionSource"), List.of("sessions"), only(current), true, "sessions", 5)));
+				List.of(current, previous), ALL, null, null),
+			report(List.of("sessionDefaultChannelGroup"), List.of("sessions", "totalUsers"), List.of(current, previous), ORGANIC_AND_DIRECT, null, null),
+			report(List.of("landingPage"), List.of("sessions", "engagementRate", "keyEvents"), only(current), ALL, "sessions", 5)));
 		List<JsonNode> second = ga4.batch(property, List.of(
-			report(List.of("countryId", "country"), List.of("sessions"), only(current), true, "sessions", 8),
-			report(List.of("deviceCategory"), List.of("sessions"), only(current), true, "sessions", null)));
+			report(List.of("sessionDefaultChannelGroup"), List.of("sessions"), only(current), ALL, "sessions", 8),
+			report(List.of("sessionSource"), List.of("sessions"), only(current), ORGANIC, "sessions", 5),
+			report(List.of("countryId", "country"), List.of("sessions"), only(current), ALL, "sessions", 10),
+			report(List.of("countryId"), List.of("sessions"), only(current), ORGANIC, "sessions", 250),
+			report(List.of("deviceCategory"), List.of("sessions"), only(current), ALL, "sessions", null)));
 
-		Totals totals = totals(first.get(1));
+		Totals totals = totals(first.get(2), first.get(3));
 		List<LandingPage> pages = new ArrayList<>();
-		for (JsonNode row : rows(first.get(3))) {
+		for (JsonNode row : rows(first.get(4))) {
 			pages.add(new LandingPage(dim(row, 0), longMetric(row, 0), percent(row, 1), longMetric(row, 2)));
 		}
 		long pageSessions = pages.stream().mapToLong(LandingPage::sessions).sum();
 
 		List<Engine> engines = new ArrayList<>();
-		for (JsonNode row : rows(first.get(4))) engines.add(new Engine(dim(row, 0), longMetric(row, 0)));
+		for (JsonNode row : rows(second.get(1))) engines.add(new Engine(dim(row, 0), longMetric(row, 0)));
 		long engineSessions = engines.stream().mapToLong(Engine::sessions).sum();
 		// The engines add up to the organic total: whatever the top five leave is "other".
-		if (totals.sessions() > engineSessions && !engines.isEmpty()) engines.add(new Engine("other", totals.sessions() - engineSessions));
+		long organicSessions = totals.organic().sessions();
+		if (organicSessions > engineSessions && !engines.isEmpty()) engines.add(new Engine("other", organicSessions - engineSessions));
 
 		List<Channel> channels = new ArrayList<>();
-		for (JsonNode row : rows(first.get(2))) channels.add(new Channel(dim(row, 0), longMetric(row, 0)));
+		for (JsonNode row : rows(second.get(0))) channels.add(new Channel(dim(row, 0), longMetric(row, 0)));
 		// Organic first, the channel this page is about; the rest largest-first.
 		channels.sort((a, b) -> a.channel().equals("Organic Search") ? -1 : b.channel().equals("Organic Search") ? 1
 			: Long.compare(b.sessions(), a.sessions()));
 
+		Map<String, Long> organicByCountry = new LinkedHashMap<>();
+		for (JsonNode row : rows(second.get(3))) organicByCountry.put(dim(row, 0), longMetric(row, 0));
 		List<Country> countries = new ArrayList<>();
-		for (JsonNode row : rows(second.get(0))) {
-			if (!"(not set)".equals(dim(row, 0))) countries.add(new Country(dim(row, 1), dim(row, 0), longMetric(row, 0)));
+		for (JsonNode row : rows(second.get(2))) {
+			String id = dim(row, 0);
+			if (!"(not set)".equals(id)) {
+				countries.add(new Country(dim(row, 1), id, longMetric(row, 0), organicByCountry.getOrDefault(id, 0L)));
+			}
 		}
 		List<Device> devices = new ArrayList<>();
-		for (JsonNode row : rows(second.get(1))) devices.add(new Device(dim(row, 0), longMetric(row, 0)));
+		for (JsonNode row : rows(second.get(4))) devices.add(new Device(dim(row, 0), longMetric(row, 0)));
 
 		return new Overview(view(brand), period.range(), period.start().toString(), period.end().toString(), period.step().name(),
-			Instant.now(), traffic(first.get(0), period), totals, channels,
+			Instant.now(), traffic(first.get(0), first.get(1), period), totals, channels,
 			pages, Math.max(0, totals.sessions() - pageSessions), engines, countries, devices);
 	}
 
 	/** Every hour, day, week or month of the period, with zeros where GA4 had nothing. */
-	private static List<TrafficPoint> traffic(JsonNode report, SeoPeriod period) {
+	private static List<TrafficPoint> traffic(JsonNode all, JsonNode byChannel, SeoPeriod period) {
+		// key → {sessions, users, organic sessions, organic users, direct sessions, direct users}
 		Map<String, long[]> byKey = new LinkedHashMap<>();
-		for (JsonNode row : rows(report)) byKey.put(dim(row, 0), new long[] {longMetric(row, 0), longMetric(row, 1)});
+		for (JsonNode row : rows(all)) {
+			byKey.computeIfAbsent(dim(row, 0), k -> new long[6])[0] = longMetric(row, 0);
+			byKey.get(dim(row, 0))[1] = longMetric(row, 1);
+		}
+		for (JsonNode row : rows(byChannel)) {
+			long[] v = byKey.computeIfAbsent(dim(row, 0), k -> new long[6]);
+			int at = "Organic Search".equals(dim(row, 1)) ? 2 : "Direct".equals(dim(row, 1)) ? 4 : -1;
+			if (at < 0) continue;
+			v[at] = longMetric(row, 0);
+			v[at + 1] = longMetric(row, 1);
+		}
 		List<TrafficPoint> points = new ArrayList<>();
 		switch (period.step()) {
 			case HOUR -> {
 				for (int h = 0; h < 24; h++) {
-					long[] v = byKey.getOrDefault(String.format("%02d", h), new long[2]);
-					points.add(new TrafficPoint(period.start() + "T" + String.format("%02d", h) + ":00", v[0], v[1]));
+					long[] v = byKey.getOrDefault(String.format("%02d", h), new long[6]);
+					points.add(new TrafficPoint(period.start() + "T" + String.format("%02d", h) + ":00", v[0], v[1], v[2], v[3], v[4], v[5]));
 				}
 			}
 			case DAY -> {
 				for (LocalDate day = period.start(); !day.isAfter(period.end()); day = day.plusDays(1)) {
-					long[] v = byKey.getOrDefault(day.format(GA_DATE), new long[2]);
-					points.add(new TrafficPoint(day.toString(), v[0], v[1]));
+					long[] v = byKey.getOrDefault(day.format(GA_DATE), new long[6]);
+					points.add(new TrafficPoint(day.toString(), v[0], v[1], v[2], v[3], v[4], v[5]));
 				}
 			}
 			case WEEK -> {
 				long weeks = (period.days() + 6) / 7;
 				for (int n = 0; n < weeks; n++) {
-					long[] v = byKey.getOrDefault(String.format("%04d", n), new long[2]);
-					points.add(new TrafficPoint(period.start().plusDays(7L * n).toString(), v[0], v[1]));
+					long[] v = byKey.getOrDefault(String.format("%04d", n), new long[6]);
+					points.add(new TrafficPoint(period.start().plusDays(7L * n).toString(), v[0], v[1], v[2], v[3], v[4], v[5]));
 				}
 			}
 			case MONTH -> {
 				for (LocalDate month = period.start().withDayOfMonth(1); !month.isAfter(period.end()); month = month.plusMonths(1)) {
-					long[] v = byKey.getOrDefault(month.format(DateTimeFormatter.ofPattern("yyyyMM")), new long[2]);
+					long[] v = byKey.getOrDefault(month.format(DateTimeFormatter.ofPattern("yyyyMM")), new long[6]);
 					LocalDate shown = month.isBefore(period.start()) ? period.start() : month;
-					points.add(new TrafficPoint(shown.toString(), v[0], v[1]));
+					points.add(new TrafficPoint(shown.toString(), v[0], v[1], v[2], v[3], v[4], v[5]));
 				}
 			}
 		}
@@ -201,19 +229,35 @@ public class SeoService {
 	}
 
 	/** Two date ranges: GA4 adds a "dateRange" column (date_range_0 = current, date_range_1 = previous). */
-	private static Totals totals(JsonNode report) {
+	private static Totals totals(JsonNode report, JsonNode byChannel) {
 		double[] now = new double[6];
 		double[] before = new double[6];
 		for (JsonNode row : rows(report)) {
 			double[] target = "date_range_1".equals(dim(row, 0)) ? before : now;
 			for (int i = 0; i < 6; i++) target[i] = doubleMetric(row, i);
 		}
+		// channel → {sessions, previous sessions, users, previous users}
+		Map<String, long[]> channel = new LinkedHashMap<>();
+		for (JsonNode row : rows(byChannel)) {
+			long[] v = channel.computeIfAbsent(dim(row, 0), k -> new long[4]);
+			boolean previous = "date_range_1".equals(dim(row, 1));
+			v[previous ? 1 : 0] = longMetric(row, 0);
+			v[previous ? 3 : 2] = longMetric(row, 1);
+		}
+		long[] o = channel.getOrDefault("Organic Search", new long[4]);
+		long[] d = channel.getOrDefault("Direct", new long[4]);
 		return new Totals((long) now[0], (long) before[0], (long) now[1], (long) before[1],
 			oneDecimal(now[2] * 100), oneDecimal(before[2] * 100), (long) now[3], (long) before[3],
-			now[5] == 0 ? 0 : oneDecimal(now[4] / now[5]), before[5] == 0 ? 0 : oneDecimal(before[4] / before[5]));
+			now[5] == 0 ? 0 : oneDecimal(now[4] / now[5]), before[5] == 0 ? 0 : oneDecimal(before[4] / before[5]),
+			new ChannelTotals(o[0], o[1], o[2], o[3]), new ChannelTotals(d[0], d[1], d[2], d[3]));
 	}
 
-	private ObjectNode report(List<String> dimensions, List<String> metrics, List<String[]> ranges, boolean organic,
+	/** Which sessions a report counts. */
+	private static final int ALL = 0;
+	private static final int ORGANIC = 1;
+	private static final int ORGANIC_AND_DIRECT = 2;
+
+	private ObjectNode report(List<String> dimensions, List<String> metrics, List<String[]> ranges, int filter,
 			String orderBy, Integer limit) {
 		ObjectNode r = ga4.json().createObjectNode();
 		ArrayNode dateRanges = r.putArray("dateRanges");
@@ -224,10 +268,16 @@ public class SeoService {
 		dimensions.forEach(d -> dims.addObject().put("name", d));
 		ArrayNode mets = r.putArray("metrics");
 		metrics.forEach(m -> mets.addObject().put("name", m));
-		if (organic) {
-			ObjectNode filter = r.putObject("dimensionFilter").putObject("filter");
-			filter.put("fieldName", "sessionDefaultChannelGroup");
-			filter.putObject("stringFilter").put("value", "Organic Search");
+		if (filter != ALL) {
+			ObjectNode f = r.putObject("dimensionFilter").putObject("filter");
+			f.put("fieldName", "sessionDefaultChannelGroup");
+			if (filter == ORGANIC) {
+				f.putObject("stringFilter").put("value", "Organic Search");
+			} else {
+				ArrayNode values = f.putObject("inListFilter").putArray("values");
+				values.add("Organic Search");
+				values.add("Direct");
+			}
 		}
 		if (orderBy != null) {
 			r.putArray("orderBys").addObject().put("desc", true).putObject("metric").put("metricName", orderBy);

@@ -40,15 +40,21 @@ class SeoServiceTests {
 		when(brands.findById(3L)).thenReturn(Optional.of(brand));
 
 		String yesterday = LocalDate.now(ZoneOffset.UTC).minusDays(1).format(DateTimeFormatter.BASIC_ISO_DATE);
+		// first: chart (all), chart (organic + direct), totals (all), totals (organic + direct), landing pages
 		List<JsonNode> first = List.of(
 			report("[[\"" + yesterday + "\"],[\"x\"]]", "[[\"40\",\"30\"],[\"1\",\"1\"]]"),
+			report("[[\"" + yesterday + "\",\"Organic Search\"],[\"" + yesterday + "\",\"Direct\"]]", "[[\"25\",\"20\"],[\"10\",\"8\"]]"),
 			report("[[\"date_range_0\"],[\"date_range_1\"]]",
 				"[[\"100\",\"80\",\"0.5\",\"6\",\"9000\",\"60\"],[\"50\",\"40\",\"0.4\",\"3\",\"3000\",\"30\"]]"),
-			report("[[\"Direct\"],[\"Organic Search\"],[\"Referral\"]]", "[[\"300\"],[\"100\"],[\"20\"]]"),
-			report("[[\"/\"],[\"/setup\"]]", "[[\"60\",\"0.55\",\"2\"],[\"25\",\"0.7\",\"1\"]]"),
-			report("[[\"google\"],[\"bing\"]]", "[[\"90\"],[\"6\"]]"));
+			report("[[\"Organic Search\",\"date_range_0\"],[\"Organic Search\",\"date_range_1\"],[\"Direct\",\"date_range_0\"]]",
+				"[[\"100\",\"70\"],[\"40\",\"30\"],[\"30\",\"25\"]]"),
+			report("[[\"/\"],[\"/setup\"]]", "[[\"60\",\"0.55\",\"2\"],[\"25\",\"0.7\",\"1\"]]"));
+		// second: channels, engines (organic), countries (all), countries (organic), devices
 		List<JsonNode> second = List.of(
-			report("[[\"CA\",\"Canada\"],[\"(not set)\",\"(not set)\"]]", "[[\"70\"],[\"5\"]]"),
+			report("[[\"Direct\"],[\"Organic Search\"],[\"Referral\"]]", "[[\"300\"],[\"100\"],[\"20\"]]"),
+			report("[[\"google\"],[\"bing\"]]", "[[\"90\"],[\"6\"]]"),
+			report("[[\"SG\",\"Singapore\"],[\"CA\",\"Canada\"],[\"(not set)\",\"(not set)\"]]", "[[\"120\"],[\"70\"],[\"5\"]]"),
+			report("[[\"CA\"]]", "[[\"60\"]]"),
 			report("[[\"mobile\"],[\"desktop\"]]", "[[\"65\"],[\"35\"]]"));
 		when(ga4.batch(eq("412305881"), anyList())).thenReturn(first, second);
 
@@ -60,6 +66,12 @@ class SeoServiceTests {
 		assertThat(o.traffic().get(0).sessions()).isZero();
 		assertThat(o.totals().sessions()).isEqualTo(100);
 		assertThat(o.totals().previousSessions()).isEqualTo(50);
+		// The chart tabs and the hero: organic and direct apart.
+		assertThat(o.traffic().get(6).organicSessions()).isEqualTo(25);
+		assertThat(o.traffic().get(6).directSessions()).isEqualTo(10);
+		assertThat(o.totals().organic().sessions()).isEqualTo(100);
+		assertThat(o.totals().organic().previousSessions()).isEqualTo(40);
+		assertThat(o.totals().direct().users()).isEqualTo(25);
 		assertThat(o.totals().engagementRate()).isEqualTo(50.0);
 		assertThat(o.totals().averageEngagementSeconds()).isEqualTo(150.0);
 		assertThat(o.channels()).extracting(SeoService.Channel::channel).containsExactly("Organic Search", "Direct", "Referral");
@@ -67,7 +79,9 @@ class SeoServiceTests {
 		assertThat(o.landingTailSessions()).isEqualTo(15);
 		assertThat(o.engines()).extracting(SeoService.Engine::source).containsExactly("google", "bing", "other");
 		assertThat(o.engines().get(2).sessions()).isEqualTo(4);
-		assertThat(o.countries()).extracting(SeoService.Country::countryId).containsExactly("CA");
+		// Every visitor per country, and the ones from search beside it.
+		assertThat(o.countries()).extracting(SeoService.Country::countryId).containsExactly("SG", "CA");
+		assertThat(o.countries()).extracting(SeoService.Country::organicSessions).containsExactly(0L, 60L);
 
 		// Kept ten minutes: a second look asks Google nothing.
 		service.overview(3, "7d", null, null);
