@@ -6,6 +6,7 @@ import com.onebase.actionlog.ActionLogService;
 import com.onebase.brand.BrandDtos.BrandResponse;
 import com.onebase.brand.BrandDtos.LookupResponse;
 import com.onebase.brand.BrandDtos.SaveBrandRequest;
+import com.onebase.client.ClientRepository;
 import com.onebase.common.ApiException;
 import com.onebase.security.AuthPrincipal;
 import com.onebase.user.User;
@@ -13,6 +14,7 @@ import com.onebase.user.UserRepository;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -44,17 +46,24 @@ public class BrandService {
 	private final BrandLookup lookup;
 	private final UserRepository users;
 	private final ActionLogService actionLog;
+	private final ClientRepository clients;
 
-	public BrandService(BrandRepository brands, BrandLookup lookup, UserRepository users, ActionLogService actionLog) {
+	public BrandService(BrandRepository brands, BrandLookup lookup, UserRepository users, ActionLogService actionLog,
+			ClientRepository clients) {
 		this.brands = brands;
 		this.lookup = lookup;
 		this.users = users;
 		this.actionLog = actionLog;
+		this.clients = clients;
 	}
 
 	@Transactional(readOnly = true)
 	public List<BrandResponse> list() {
-		return brands.findAllByOrderByCreatedAtAscIdAsc().stream().map(BrandResponse::from).toList();
+		Map<Long, Long> counts = new HashMap<>();
+		for (Object[] row : clients.countByBrand()) counts.put((Long) row[0], (Long) row[1]);
+		return brands.findAllByOrderByCreatedAtAscIdAsc().stream()
+			.map(brand -> BrandResponse.from(brand, counts.getOrDefault(brand.getId(), 0L)))
+			.toList();
 	}
 
 	@Transactional(readOnly = true)

@@ -64,6 +64,11 @@ public class WhatsAppConversation {
 		unreadCount = 0;
 	}
 
+	/** The client this number belongs to (the Clients module keeps it right). */
+	public void linkClient(Long clientId) {
+		this.clientId = clientId;
+	}
+
 	private void touch(String preview, Instant at) {
 		if (lastMessageAt != null && at.isBefore(lastMessageAt)) return;
 		lastMessageAt = at;

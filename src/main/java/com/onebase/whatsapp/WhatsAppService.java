@@ -1,5 +1,6 @@
 package com.onebase.whatsapp;
 
+import com.onebase.client.ClientService;
 import com.onebase.common.ApiException;
 import com.onebase.security.AuthPrincipal;
 import com.onebase.whatsapp.WhatsAppMessage.Direction;
@@ -34,7 +35,7 @@ public class WhatsAppService {
 	static final int MAX_TEXT = 4096;
 
 	public record ConversationView(long id, String waId, String phone, String name, int unread, Instant lastMessageAt,
-			String preview, boolean windowOpen, Instant windowEndsAt) {
+			String preview, boolean windowOpen, Instant windowEndsAt, Long clientId) {
 	}
 
 	public record MessageView(long id, String direction, String type, String body, boolean hasMedia, String mediaMime,
@@ -48,13 +49,15 @@ public class WhatsAppService {
 	private final WhatsAppMessageRepository messages;
 	private final WhatsAppCloudApi api;
 	private final WhatsAppSettings settings;
+	private final ClientService clients;
 
 	public WhatsAppService(WhatsAppConversationRepository conversations, WhatsAppMessageRepository messages,
-			WhatsAppCloudApi api, WhatsAppSettings settings) {
+			WhatsAppCloudApi api, WhatsAppSettings settings, ClientService clients) {
 		this.conversations = conversations;
 		this.messages = messages;
 		this.api = api;
 		this.settings = settings;
+		this.clients = clients;
 	}
 
 	// ── What Meta sends us ─────────────────────────────────────────────────────
@@ -125,6 +128,9 @@ public class WhatsAppService {
 			media == null ? null : media.path("mime_type").asString(null),
 			media == null ? null : media.path("filename").asString(null), at));
 		conversation.received(name, preview(type, body, media == null ? null : media.path("filename").asString(null)), at);
+		// Every number is a client: found by its number, or made now as New.
+		Long clientId = clients.fromWhatsApp(from, name);
+		if (clientId != null && !clientId.equals(conversation.getClientId())) conversation.linkClient(clientId);
 		conversations.save(conversation);
 	}
 
@@ -307,7 +313,7 @@ public class WhatsAppService {
 		Instant ends = c.getLastInboundAt() == null ? null : c.getLastInboundAt().plus(WINDOW);
 		String phone = "+" + c.getWaId();
 		return new ConversationView(c.getId(), c.getWaId(), phone, c.getContactName() == null ? phone : c.getContactName(),
-			c.getUnreadCount(), c.getLastMessageAt(), c.getLastPreview(), windowOpen(c), ends);
+			c.getUnreadCount(), c.getLastMessageAt(), c.getLastPreview(), windowOpen(c), ends, c.getClientId());
 	}
 
 	private static MessageView view(WhatsAppMessage m) {

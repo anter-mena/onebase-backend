@@ -102,6 +102,8 @@ public class SecurityConfig {
 				// Reading the brand list: both roles (Commercials pick a brand for clients and payments).
 				// Adding, editing and switching brands fall through to Admin-only below.
 				.requestMatchers(HttpMethod.GET, "/api/brands").authenticated()
+				// Deleting a client: Admins only (adding and editing are open to both roles below).
+				.requestMatchers(HttpMethod.DELETE, "/api/clients/**").hasRole("ADMIN")
 				// Both roles: their own account, and the four areas a Commercial works in.
 				.requestMatchers(COMMERCIAL_API).authenticated()
 				// Everything else — Users, Configuration, Dashboard, SEO, Action log, and any

@@ -23,17 +23,21 @@ public final class BrandDtos {
 			/** Our own address for the logo, or null when there is none. Changes when the logo does. */
 			String logoUrl,
 			boolean active,
-			/** 0 until the Clients module exists. */
+			/** Clients on this brand, deleted ones left out. */
 			long clients,
 			/** The Google Analytics 4 property number, or null. */
 			String ga4PropertyId,
 			Instant createdAt) {
 
 		static BrandResponse from(Brand brand) {
+			return from(brand, 0);
+		}
+
+		static BrandResponse from(Brand brand, long clients) {
 			String logoUrl = brand.getLogo() == null ? null
 				: "/api/brands/" + brand.getId() + "/logo?v=" + brand.getLogoUpdatedAt().toEpochMilli();
 			return new BrandResponse(brand.getId(), brand.getName(), brand.getDomain(), brand.getWebsiteUrl(),
-				brand.socials(), logoUrl, brand.isActive(), 0, brand.getGa4PropertyId(), brand.getCreatedAt());
+				brand.socials(), logoUrl, brand.isActive(), clients, brand.getGa4PropertyId(), brand.getCreatedAt());
 		}
 	}
 

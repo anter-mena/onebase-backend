@@ -95,6 +95,12 @@
 			<artifactId>jsoup</artifactId>
 			<version>1.21.1</version>
 		</dependency>
+		<!-- A client's country from their phone number: Google's numbering-plan data, offline. -->
+		<dependency>
+			<groupId>com.googlecode.libphonenumber</groupId>
+			<artifactId>libphonenumber</artifactId>
+			<version>9.0.40</version>
+		</dependency>
 
 		<!-- Sign-in tokens. -->
 		<dependency>
