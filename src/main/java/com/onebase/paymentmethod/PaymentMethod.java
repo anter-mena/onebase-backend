@@ -18,7 +18,7 @@ import java.time.Instant;
 @Table(name = "payment_methods")
 public class PaymentMethod {
 
-	public enum Provider { PAYPAL, BINANCE, INTERAC, OTHER }
+	public enum Provider { PAYPAL, BINANCE, INTERAC, DEBIT_CARD }
 
 	/** Only decides which logos are drawn on the card. */
 	public enum CardNetwork { VISA, MASTERCARD, BOTH }

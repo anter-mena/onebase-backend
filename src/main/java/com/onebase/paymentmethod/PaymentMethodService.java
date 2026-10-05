@@ -140,7 +140,7 @@ public class PaymentMethodService {
 			case PAYPAL -> "PayPal";
 			case BINANCE -> "Binance";
 			case INTERAC -> "Interac";
-			case OTHER -> "Other";
+			case DEBIT_CARD -> "Debit card";
 		};
 	}
 }

@@ -54,7 +54,7 @@ class PaymentMethodModuleTests {
 			.andExpect(jsonPath("$.balance").value(0.0))
 			.andExpect(jsonPath("$.active").value(true));
 
-		save(admin, null, "OTHER", "alpha paypal", "Someone", "VISA", null, null)
+		save(admin, null, "DEBIT_CARD", "alpha paypal", "Someone", "VISA", null, null)
 			.andExpect(status().isConflict())
 			.andExpect(jsonPath("$.message").value("A method called Alpha PayPal already exists."));
 	}
