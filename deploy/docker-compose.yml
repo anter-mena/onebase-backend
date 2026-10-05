@@ -64,6 +64,10 @@ services:
       #   not /proc, which would expose every process and its secrets.
       - /etc/os-release:/host/etc/os-release:ro
       - /proc/1/net/dev:/host/proc/1/net/dev:ro
+      # SEO Overview: the Google Analytics service account key (GA4_CREDENTIALS_FILE in
+      # backend.env). Only on the VPS, never in git: /opt/onebase/secrets/ga4-key.json,
+      # owned by the container user (999), read-only for it alone.
+      - /opt/onebase/secrets/ga4-key.json:/run/secrets/ga4-key.json:ro
     # Deliberately no depends_on the proxy: it is a panel on a monitoring page, and
     # a failed pull of it must not stop the app. Unreachable shows as "not connected".
     depends_on:

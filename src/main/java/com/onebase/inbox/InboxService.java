@@ -105,16 +105,18 @@ public class InboxService {
 		if (q != null && !q.isBlank()) parts.add(q.trim());
 		int size = limit == null ? DEFAULT_LIMIT : Math.max(1, Math.min(MAX_LIMIT, limit));
 		List<BrandMatch> matches = brandMatches();
-		if (key != FolderKey.INBOX) {
+		if (key != FolderKey.INBOX && key != FolderKey.SENT) {
 			return mailbox.list(key, String.join(" ", parts), size).stream().map(s -> summary(s, matches)).toList();
 		}
-		// Gmail puts our reply in the Inbox too, because its conversation is there. An email we
-		// sent to someone outside belongs in Sent only; a website form email is sent to our own
-		// support@ address, so it stays.
+		// Inbox = what we received, Sent = what we sent to someone else. Gmail mixes the two:
+		// our reply joins the Inbox conversation, and a website form email (sent by this account,
+		// to our own support@) is filed under Sent. "Received" here means addressed to us.
 		Set<String> ours = new LinkedHashSet<>();
 		senders(matches).forEach(sender -> ours.add(sender.email()));
+		java.util.function.Predicate<Snapshot> received = s ->
+			!s.sentByUs() || concat(s.to(), s.cc()).stream().anyMatch(a -> ours.contains(a.email()) || isOwnDomainAlias(a.email(), matches));
 		return mailbox.list(key, String.join(" ", parts), Math.min(MAX_LIMIT + 50, size + 50)).stream()
-			.filter(s -> !s.sentByUs() || concat(s.to(), s.cc()).stream().anyMatch(a -> ours.contains(a.email())))
+			.filter(s -> key == FolderKey.INBOX ? received.test(s) : !received.test(s))
 			.limit(size)
 			.map(s -> summary(s, matches))
 			.toList();

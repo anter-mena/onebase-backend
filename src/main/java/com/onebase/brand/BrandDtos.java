@@ -25,13 +25,15 @@ public final class BrandDtos {
 			boolean active,
 			/** 0 until the Clients module exists. */
 			long clients,
+			/** The Google Analytics 4 property number, or null. */
+			String ga4PropertyId,
 			Instant createdAt) {
 
 		static BrandResponse from(Brand brand) {
 			String logoUrl = brand.getLogo() == null ? null
 				: "/api/brands/" + brand.getId() + "/logo?v=" + brand.getLogoUpdatedAt().toEpochMilli();
 			return new BrandResponse(brand.getId(), brand.getName(), brand.getDomain(), brand.getWebsiteUrl(),
-				brand.socials(), logoUrl, brand.isActive(), 0, brand.getCreatedAt());
+				brand.socials(), logoUrl, brand.isActive(), 0, brand.getGa4PropertyId(), brand.getCreatedAt());
 		}
 	}
 
@@ -62,6 +64,8 @@ public final class BrandDtos {
 	 *                       On Edit: a new one, or null to keep the current one
 	 * @param removeLogo     Edit only: drop the logo (the initials are shown instead)
 	 * @param fetchedFromSite the Admin pressed "Fetch again" before saving — said so in the Action log
+	 * @param ga4PropertyId  the GA4 property number ("properties/123…" is accepted too); "" clears it,
+	 *                       left out (null) keeps it as it is
 	 */
 	public record SaveBrandRequest(
 			@NotBlank(message = "Enter the brand's website, like nike.com.") String websiteUrl,
@@ -69,11 +73,13 @@ public final class BrandDtos {
 			Map<String, String> socials,
 			@Size(max = 1_500_000, message = "The logo is too large. Use a picture under 1 MB.") String logo,
 			Boolean removeLogo,
-			Boolean fetchedFromSite) {
+			Boolean fetchedFromSite,
+			@Size(max = 40, message = "The GA4 property ID is a number, like 412305881.") String ga4PropertyId) {
 
 		/** Both flags are optional: left out means no. */
 		public SaveBrandRequest {
 			name = name == null ? null : name.trim();
+			ga4PropertyId = ga4PropertyId == null ? null : ga4PropertyId.trim().replaceFirst("(?i)^properties/", "");
 			removeLogo = Boolean.TRUE.equals(removeLogo);
 			fetchedFromSite = Boolean.TRUE.equals(fetchedFromSite);
 		}

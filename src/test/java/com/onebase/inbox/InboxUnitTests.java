@@ -196,8 +196,8 @@ class InboxUnitTests {
 		f.service.list("inbox", "invoice", true, "Easy IPTV", 500);
 		// The Inbox asks for 50 more, to make up for our own answers it leaves out.
 		verify(f.mailbox).list(FolderKey.INBOX, "label:Easy-IPTV is:unread invoice", InboxService.MAX_LIMIT + 50);
-		f.service.list("sent", null, false, null, 30);
-		verify(f.mailbox).list(FolderKey.SENT, "", 30);
+		f.service.list("trash", null, false, null, 30);
+		verify(f.mailbox).list(FolderKey.TRASH, "", 30);
 	}
 
 	@Test
@@ -219,6 +219,11 @@ class InboxUnitTests {
 
 		assertThat(f.service.list("inbox", null, false, null, null)).extracting(InboxDtos.MailSummary::id)
 			.containsExactly("23", "21");
+
+		// Sent: only what went to someone else — not the website form email.
+		when(f.mailbox.list(eq(FolderKey.SENT), eq(""), anyInt())).thenReturn(List.of(ourReply, form));
+		assertThat(f.service.list("sent", null, false, null, null)).extracting(InboxDtos.MailSummary::id)
+			.containsExactly("22");
 	}
 
 	@Test

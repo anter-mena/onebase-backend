@@ -149,7 +149,30 @@ class BrandModuleTests {
 		save(admin, null, "not a website", "Epsilon", "{}", null).andExpect(status().isBadRequest());
 	}
 
-	// ── Helpers ─────────────────────────────────────────────────────────
+	@Test
+	void aBrandKeepsItsGa4PropertyForTheSeoPage() throws Exception {
+		String admin = token("ga4-admin@onebase.test", UserRole.ADMIN);
+		String body = "{\"websiteUrl\":\"ga4-brand.ca\",\"name\":\"GA4 Brand\",\"socials\":{},\"ga4PropertyId\":\"properties/412305881\"}";
+		long id = idOf(mvc.perform(post("/api/brands").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content(body))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.ga4PropertyId").value("412305881")));
+		mvc.perform(put("/api/brands/" + id).header("Authorization", "Bearer " + admin).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"websiteUrl\":\"ga4-brand.ca\",\"name\":\"GA4 Brand\",\"socials\":{},\"ga4PropertyId\":\"G-ABC123\"}"))
+			.andExpect(status().isBadRequest());
+		// Left out = kept as it is (an older screen does not wipe it).
+		save(admin, id, "ga4-brand.ca", "GA4 Brand", "{}", null).andExpect(jsonPath("$.ga4PropertyId").value("412305881"));
+		mvc.perform(get("/api/seo/brands").header("Authorization", "Bearer " + admin))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[?(@.name == 'GA4 Brand')].propertyId").value(org.hamcrest.Matchers.contains("412305881")));
+		// No key on the server in tests: an honest "not connected".
+		mvc.perform(get("/api/seo/overview").param("brandId", String.valueOf(id)).header("Authorization", "Bearer " + admin))
+			.andExpect(status().isServiceUnavailable());
+		String commercial = token("ga4-commercial@onebase.test", UserRole.COMMERCIAL);
+		mvc.perform(get("/api/seo/brands").header("Authorization", "Bearer " + commercial)).andExpect(status().isForbidden());
+	}
+
+		// ── Helpers ─────────────────────────────────────────────────────────
 
 	private ResultActions save(String token, Long id, String website, String name, String socialsJson, String logo)
 			throws Exception {

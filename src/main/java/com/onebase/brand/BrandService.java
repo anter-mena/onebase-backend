@@ -86,6 +86,7 @@ public class BrandService {
 		Brand brand = new Brand(request.name(), website.domain(), website.url());
 		brand.setSocials(BrandLinks.socials(request.socials()));
 		if (request.logo() != null && !request.logo().isBlank()) brand.setLogo(storedLogo(request.logo()));
+		if (request.ga4PropertyId() != null) brand.setGa4PropertyId(ga4Property(request.ga4PropertyId()));
 		brand = saveRefusingDuplicates(brand);
 
 		actionLog.record(actor(admin), Action.CREATED, TargetType.BRAND, brand.getId(), brand.getName(),
@@ -109,6 +110,14 @@ public class BrandService {
 			if (!Objects.equals(before.get(network), socials.get(network))) changed.add(BrandLinks.label(network));
 		}
 
+		if (request.ga4PropertyId() != null) {
+			String property = ga4Property(request.ga4PropertyId());
+			if (!Objects.equals(property, brand.getGa4PropertyId())) {
+				changed.add(property == null ? "GA4 property removed" : "GA4 property to " + property);
+			}
+			brand.setGa4PropertyId(property);
+		}
+
 		brand.setName(request.name());
 		brand.setWebsite(website.domain(), website.url());
 		brand.setSocials(socials);
@@ -127,6 +136,15 @@ public class BrandService {
 			actionLog.record(actor(admin), Action.UPDATED, TargetType.BRAND, brand.getId(), brand.getName(), detail);
 		}
 		return BrandResponse.from(brand);
+	}
+
+	/** "" = none; otherwise only digits (the number GA4 shows under Admin → Property details). */
+	private static String ga4Property(String value) {
+		if (value.isBlank()) return null;
+		if (!value.matches("[0-9]{6,15}")) {
+			throw ApiException.badRequest("The GA4 property ID is a number, like 412305881 (GA4 → Admin → Property details).");
+		}
+		return value;
 	}
 
 	@Transactional

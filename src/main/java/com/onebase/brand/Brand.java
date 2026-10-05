@@ -55,6 +55,10 @@ public class Brand {
 	@Column(name = "logo_updated_at")
 	private Instant logoUpdatedAt;
 
+	/** The brand's Google Analytics 4 property number, for the SEO page. Null = none. */
+	@Column(name = "ga4_property_id")
+	private String ga4PropertyId;
+
 	@Column(nullable = false)
 	private boolean active = true;
 
@@ -108,6 +112,11 @@ public class Brand {
 		touch();
 	}
 
+	void setGa4PropertyId(String ga4PropertyId) {
+		this.ga4PropertyId = ga4PropertyId;
+		touch();
+	}
+
 	void setActive(boolean active) {
 		this.active = active;
 		touch();
@@ -123,6 +132,7 @@ public class Brand {
 	public String getWebsiteUrl() { return websiteUrl; }
 	public byte[] getLogo() { return logo; }
 	public Instant getLogoUpdatedAt() { return logoUpdatedAt; }
+	public String getGa4PropertyId() { return ga4PropertyId; }
 	public boolean isActive() { return active; }
 	public Instant getCreatedAt() { return createdAt; }
 }
