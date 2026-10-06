@@ -105,11 +105,12 @@ class ExpensesModuleTests {
 	}
 
 	@Test
-	void commercialsSeeNoneOfIt() throws Exception {
+	void commercialsReadPlansAndPerksButChangeNothing() throws Exception {
 		String commercial = token("exp-commercial@onebase.test", UserRole.COMMERCIAL);
-		for (String url : new String[] { "/api/perks", "/api/credit", "/api/plans" }) {
-			mvc.perform(get(url).header("Authorization", "Bearer " + commercial)).andExpect(status().isForbidden());
-		}
+		// The Add payment window prices a payment from these.
+		mvc.perform(get("/api/perks").header("Authorization", "Bearer " + commercial)).andExpect(status().isOk());
+		mvc.perform(get("/api/plans").header("Authorization", "Bearer " + commercial)).andExpect(status().isOk());
+		mvc.perform(get("/api/credit").header("Authorization", "Bearer " + commercial)).andExpect(status().isForbidden());
 		topUp(commercial, 10, "5", null).andExpect(status().isForbidden());
 		saveCosts(commercial, "{\"devices\":1,\"months\":1,\"cost\":1,\"credits\":1}").andExpect(status().isForbidden());
 	}

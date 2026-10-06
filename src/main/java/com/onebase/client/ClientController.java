@@ -8,13 +8,11 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,6 +21,9 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Clients. Admins and Commercials (SecurityConfig.COMMERCIAL_API); delete is
  * Admin-only (SecurityConfig).
+ *
+ * <p>No add (decided 2026-10-06): a client is only made by their first WhatsApp
+ * message (see {@link ClientService#fromWhatsApp}); the team completes them here.
  */
 @RestController
 @RequestMapping("/api/clients")
@@ -45,13 +46,6 @@ public class ClientController {
 	@Operation(summary = "One client")
 	public ClientResponse get(@PathVariable long id) {
 		return service.get(id);
-	}
-
-	@PostMapping
-	@Operation(summary = "Add a client", description = "Full name, and a phone or an email. 409 if the phone already belongs to a client.")
-	public ResponseEntity<ClientResponse> create(@AuthenticationPrincipal AuthPrincipal user,
-			@Valid @RequestBody SaveClientRequest request) {
-		return ResponseEntity.status(HttpStatus.CREATED).body(service.create(user, request));
 	}
 
 	@PutMapping("/{id}")

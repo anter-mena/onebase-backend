@@ -34,8 +34,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * Clients: the client WhatsApp makes, one client per number, add / edit / note /
- * delete, and who may do what.
+ * Clients: the client WhatsApp makes (the only way one is made), one client per
+ * number, edit / note / delete, and who may do what.
  */
 @SpringBootTest(properties = {
 	"onebase.docs.username=test-docs",
@@ -102,39 +102,33 @@ class ClientModuleTests {
 	}
 
 	@Test
-	void theTeamAddsAndEditsClientsOnePerNumber() throws Exception {
+	void theTeamCompletesClientsButCannotAddThemOnePerNumber() throws Exception {
 		String commercial = token("cl-commercial@onebase.test", UserRole.COMMERCIAL);
 
+		// No Add client: only WhatsApp makes clients.
 		mvc.perform(post("/api/clients").header("Authorization", "Bearer " + commercial).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"fullName\":\"Sara Amrani\",\"phone\":\"+212612345679\",\"status\":\"NEW\"}"))
+			.andExpect(status().isMethodNotAllowed());
+
+		webhook(inbound("212611110004", "Sara", "wamid.E1", "Hi"));
+		webhook(inbound("212611110005", "Other", "wamid.E2", "Hi"));
+		long id = clients.findByPhone("+212611110004").orElseThrow().getId();
+
+		mvc.perform(put("/api/clients/" + id).header("Authorization", "Bearer " + commercial).contentType(MediaType.APPLICATION_JSON)
 				.content("{\"fullName\":\"Sara Amrani\",\"phone\":\"0612345679\",\"status\":\"NEW\"}"))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.message").value(PhoneNumbers.NEEDS_COUNTRY_CODE));
-		mvc.perform(post("/api/clients").header("Authorization", "Bearer " + commercial).contentType(MediaType.APPLICATION_JSON)
-				.content("{\"phone\":\"+212612345679\",\"status\":\"NEW\"}"))
-			.andExpect(status().isBadRequest())
-			.andExpect(jsonPath("$.message").value(ClientService.NEEDS_NAME));
-
-		String created = mvc.perform(post("/api/clients").header("Authorization", "Bearer " + commercial)
-				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"fullName\":\"  Sara   Amrani \",\"email\":\"Sara@Example.com\",\"phone\":\"+212 6 12 34 56 79\",\"status\":\"TRIAL\"}"))
-			.andExpect(status().isCreated())
-			.andExpect(jsonPath("$.name").value("Sara Amrani"))
-			.andExpect(jsonPath("$.email").value("sara@example.com"))
-			.andExpect(jsonPath("$.phone").value("+212612345679"))
-			.andExpect(jsonPath("$.country").value("MA"))
-			.andExpect(jsonPath("$.source").value("MANUAL"))
-			.andReturn().getResponse().getContentAsString();
-		int id = JsonPath.read(created, "$.id");
-
-		// The same number typed another way is the same client.
-		mvc.perform(post("/api/clients").header("Authorization", "Bearer " + commercial).contentType(MediaType.APPLICATION_JSON)
-				.content("{\"fullName\":\"Someone Else\",\"phone\":\"00212612345679\",\"status\":\"NEW\"}"))
+		// Another client's number, typed another way, is refused.
+		mvc.perform(put("/api/clients/" + id).header("Authorization", "Bearer " + commercial).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"fullName\":\"Sara Amrani\",\"phone\":\"00212611110005\",\"status\":\"NEW\"}"))
 			.andExpect(status().isConflict());
 
 		// Edit: a French number now, and Active.
 		mvc.perform(put("/api/clients/" + id).header("Authorization", "Bearer " + commercial).contentType(MediaType.APPLICATION_JSON)
-				.content("{\"fullName\":\"Sara Amrani\",\"email\":\"sara@example.com\",\"phone\":\"+33 6 12 34 56 78\",\"status\":\"ACTIVE\"}"))
+				.content("{\"fullName\":\"  Sara   Amrani \",\"email\":\"Sara@Example.com\",\"phone\":\"+33 6 12 34 56 78\",\"status\":\"ACTIVE\"}"))
 			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.name").value("Sara Amrani"))
+			.andExpect(jsonPath("$.email").value("sara@example.com"))
 			.andExpect(jsonPath("$.phone").value("+33612345678"))
 			.andExpect(jsonPath("$.country").value("FR"))
 			.andExpect(jsonPath("$.status").value("ACTIVE"));
@@ -146,8 +140,8 @@ class ClientModuleTests {
 
 		List<String> details = logs.findAll().stream().filter(l -> Long.valueOf(id).equals(l.getTargetId()))
 			.map(l -> l.getDetail()).toList();
-		assertThat(details).contains("Added a client, status Trial", "Changed the note");
-		assertThat(details).anyMatch(d -> d.contains("phone") && d.contains("status from Trial to Active"));
+		assertThat(details).contains("Changed the note");
+		assertThat(details).anyMatch(d -> d.contains("full name") && d.contains("phone") && d.contains("status from New to Active"));
 	}
 
 	@Test

@@ -17,7 +17,7 @@ public final class PaymentMethodDtos {
 	/**
 	 * One method.
 	 *
-	 * @param balance the total received on it, in USD — $0 until Payments is built
+	 * @param balance the total received on it, in USD (deleted payments left out)
 	 */
 	public record PaymentMethodResponse(
 			long id,
@@ -31,8 +31,12 @@ public final class PaymentMethodDtos {
 			Instant createdAt) {
 
 		static PaymentMethodResponse from(PaymentMethod method) {
+			return from(method, BigDecimal.ZERO);
+		}
+
+		static PaymentMethodResponse from(PaymentMethod method, BigDecimal balance) {
 			return new PaymentMethodResponse(method.getId(), method.getProvider(), method.getName(), method.getHolder(),
-				method.getCardNetwork(), method.getInstructions(), method.isActive(), BigDecimal.ZERO.setScale(2),
+				method.getCardNetwork(), method.getInstructions(), method.isActive(), balance.setScale(2),
 				method.getCreatedAt());
 		}
 	}

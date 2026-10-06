@@ -21,10 +21,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Configuration → Payment methods. Admins only, reading too (decided
- * 2026-10-04): `/api/payment-methods` is not in `SecurityConfig.COMMERCIAL_API`.
- * When Commercials record payments later, that form gets the names of active
- * methods only.
+ * Configuration → Payment methods. Changes: Admins only. The list: both roles
+ * since 2026-10-06 — the Add payment window picks the account a payment was
+ * made to (SecurityConfig).
  */
 @RestController
 @RequestMapping("/api/payment-methods")

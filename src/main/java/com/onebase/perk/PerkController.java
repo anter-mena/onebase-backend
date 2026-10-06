@@ -20,10 +20,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Expenses → Perks. Admins only (not in `SecurityConfig.COMMERCIAL_API`). No delete. */
+/** Expenses → Perks. Read by both roles (the Add payment window, since 2026-10-06); changed by Admins only. No delete. */
 @RestController
 @RequestMapping("/api/perks")
-@Tag(name = "Perks", description = "Admins only: extras that cost you money, such as IBO Player. No delete — switch off instead.")
+@Tag(name = "Perks", description = "Read by both roles; changed by Admins only: extras that cost you money, such as IBO Player. No delete — switch off instead.")
 public class PerkController {
 
 	public record StatusRequest(@NotNull(message = "Say whether the perk is offered.") Boolean active) {

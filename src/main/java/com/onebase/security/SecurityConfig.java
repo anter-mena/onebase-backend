@@ -102,6 +102,11 @@ public class SecurityConfig {
 				// Reading the brand list: both roles (Commercials pick a brand for clients and payments).
 				// Adding, editing and switching brands fall through to Admin-only below.
 				.requestMatchers(HttpMethod.GET, "/api/brands").authenticated()
+				// Reading the plans, perks and payment methods (the list): both roles. The
+				// Add payment window prices a payment from them and picks the account it
+				// was paid to; everyone sees its cost (decided 2026-10-06).
+				// Changing them falls through to Admin-only below.
+				.requestMatchers(HttpMethod.GET, "/api/plans", "/api/perks", "/api/payment-methods").authenticated()
 				// Deleting a client: Admins only (adding and editing are open to both roles below).
 				.requestMatchers(HttpMethod.DELETE, "/api/clients/**").hasRole("ADMIN")
 				// Both roles: their own account, and the four areas a Commercial works in.

@@ -126,6 +126,11 @@ public class Brand {
 		this.updatedAt = Instant.now();
 	}
 
+	/** Our own address for the logo (it changes when the logo does), or null when there is none. */
+	public String logoUrl() {
+		return logo == null ? null : "/api/brands/" + id + "/logo?v=" + logoUpdatedAt.toEpochMilli();
+	}
+
 	public Long getId() { return id; }
 	public String getName() { return name; }
 	public String getDomain() { return domain; }

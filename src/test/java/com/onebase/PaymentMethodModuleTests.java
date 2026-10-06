@@ -90,9 +90,10 @@ class PaymentMethodModuleTests {
 	}
 
 	@Test
-	void commercialsSeeNothing() throws Exception {
+	void commercialsReadTheListButChangeNothing() throws Exception {
 		String commercial = token("pm-commercial@onebase.test", UserRole.COMMERCIAL);
-		mvc.perform(get("/api/payment-methods").header("Authorization", "Bearer " + commercial)).andExpect(status().isForbidden());
+		// The Add payment window picks the account a payment was made to.
+		mvc.perform(get("/api/payment-methods").header("Authorization", "Bearer " + commercial)).andExpect(status().isOk());
 		save(commercial, null, "PAYPAL", "Delta", "Someone", "BOTH", null, null).andExpect(status().isForbidden());
 		mvc.perform(get("/api/payment-methods")).andExpect(status().isUnauthorized());
 	}

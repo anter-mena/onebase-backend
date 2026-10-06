@@ -82,9 +82,9 @@ class PlanModuleTests {
 	}
 
 	@Test
-	void commercialsCanNotSeeOrChangePrices() throws Exception {
+	void commercialsSeeButCanNotChangePrices() throws Exception {
 		String commercial = token("plans-commercial@onebase.test", UserRole.COMMERCIAL);
-		mvc.perform(get("/api/plans").header("Authorization", "Bearer " + commercial)).andExpect(status().isForbidden());
+		mvc.perform(get("/api/plans").header("Authorization", "Bearer " + commercial)).andExpect(status().isOk());
 		save(commercial, "{\"devices\":3,\"months\":1,\"price\":1}").andExpect(status().isForbidden());
 		mvc.perform(get("/api/plans")).andExpect(status().isUnauthorized());
 	}

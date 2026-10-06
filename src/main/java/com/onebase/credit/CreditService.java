@@ -4,6 +4,7 @@ import com.onebase.actionlog.ActionLog.Action;
 import com.onebase.actionlog.ActionLog.TargetType;
 import com.onebase.actionlog.ActionLogService;
 import com.onebase.common.ApiException;
+import com.onebase.payment.PaymentRepository;
 import com.onebase.security.AuthPrincipal;
 import com.onebase.user.User;
 import com.onebase.user.UserRepository;
@@ -18,8 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Expenses → Panel credit: top-ups, and what is left.
  *
- * <p>Credit left = all top-ups − credits used. Payments do not exist yet, so
- * "used" is 0 for now; Payments will add the credits each sale spends. A
+ * <p>Credit left = all top-ups − credits used by payments (deleted payments
+ * give theirs back). It can go below zero: a sale is saved even then. A
  * top-up is never edited or deleted (money history); a mistake is corrected
  * later with a correction line.
  */
@@ -47,11 +48,14 @@ public class CreditService {
 	}
 
 	private final CreditTopupRepository topups;
+	private final PaymentRepository payments;
 	private final UserRepository users;
 	private final ActionLogService actionLog;
 
-	public CreditService(CreditTopupRepository topups, UserRepository users, ActionLogService actionLog) {
+	public CreditService(CreditTopupRepository topups, PaymentRepository payments, UserRepository users,
+			ActionLogService actionLog) {
 		this.topups = topups;
+		this.payments = payments;
 		this.users = users;
 		this.actionLog = actionLog;
 	}
@@ -59,7 +63,7 @@ public class CreditService {
 	@Transactional(readOnly = true)
 	public CreditSummary summary() {
 		long total = topups.totalCredits();
-		long used = 0; // credits spent by payments — added with the Payments module
+		long used = payments.totalCreditsUsed();
 		BigDecimal paid = topups.totalAmount().setScale(2, RoundingMode.HALF_UP);
 		BigDecimal average = total == 0 ? null : paid.divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP);
 		LastTopup last = topups.findFirstByOrderByCreatedAtDescIdDesc()

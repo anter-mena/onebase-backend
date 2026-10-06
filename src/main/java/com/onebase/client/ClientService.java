@@ -9,12 +9,20 @@ import com.onebase.client.Client.Status;
 import com.onebase.client.ClientDtos.ClientResponse;
 import com.onebase.client.ClientDtos.SaveClientRequest;
 import com.onebase.common.ApiException;
+import com.onebase.payment.Payment;
+import com.onebase.payment.PaymentRepository;
+import com.onebase.paymentmethod.PaymentMethod;
+import com.onebase.paymentmethod.PaymentMethodRepository;
 import com.onebase.security.AuthPrincipal;
 import com.onebase.user.User;
 import com.onebase.user.UserRepository;
 import com.onebase.whatsapp.WhatsAppConversation;
 import com.onebase.whatsapp.WhatsAppConversationRepository;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -25,19 +33,21 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The Clients module: the list, one client, add, edit, the note, delete — and the
- * client WhatsApp makes when an unknown number writes.
+ * The Clients module: the list, one client, edit, the note, delete — and the
+ * client WhatsApp makes when an unknown number writes, which is the only way a
+ * client is made (decided 2026-10-06: no Add client).
  *
  * <p><b>One client per number.</b> The phone is stored as E.164 and is unique,
  * deleted clients included: a deleted client who writes again comes back rather
  * than being made twice. The client's id stays the number every payment points at.
  *
- * <p>Admins and Commercials both add and edit; only Admins delete (SecurityConfig).
+ * <p>Admins and Commercials both edit; only Admins delete (SecurityConfig).
  * Delete is soft, so past payments keep counting. Every change by a person is
  * written to the Action log; the rows WhatsApp makes say so in their source.
  */
@@ -53,14 +63,21 @@ public class ClientService {
 	private final WhatsAppConversationRepository conversations;
 	private final UserRepository users;
 	private final ActionLogService actionLog;
+	private final PaymentRepository payments;
+	private final PaymentMethodRepository methods;
+	private final ZoneId zone;
 
 	public ClientService(ClientRepository clients, BrandRepository brands, WhatsAppConversationRepository conversations,
-			UserRepository users, ActionLogService actionLog) {
+			UserRepository users, ActionLogService actionLog, PaymentRepository payments, PaymentMethodRepository methods,
+			@Value("${onebase.timezone:America/Toronto}") String zone) {
 		this.clients = clients;
 		this.brands = brands;
 		this.conversations = conversations;
 		this.users = users;
 		this.actionLog = actionLog;
+		this.payments = payments;
+		this.methods = methods;
+		this.zone = ZoneId.of(zone);
 	}
 
 	// ── The screens ───────────────────────────────────────────────────────────
@@ -73,24 +90,6 @@ public class ClientService {
 	@Transactional(readOnly = true)
 	public ClientResponse get(long id) {
 		return views(List.of(find(id))).getFirst();
-	}
-
-	@Transactional
-	public ClientResponse create(AuthPrincipal principal, SaveClientRequest request) {
-		if (request.fullName() == null) throw ApiException.badRequest(NEEDS_NAME);
-		String phone = PhoneNumbers.normalize(request.phone());
-		if (phone == null && request.email() == null) throw ApiException.badRequest(NEEDS_CONTACT);
-		refuseTaken(phone, null);
-		Long brandId = usableBrand(request.brandId(), null);
-
-		User actor = actor(principal);
-		Client client = save(Client.manual(actor.getId(), request.fullName(), request.email(), phone,
-			PhoneNumbers.country(phone), brandId, request.status(), null));
-		linkConversation(client);
-		actionLog.record(actor, Action.CREATED, TargetType.CLIENT, client.getId(), client.displayName(),
-			"Added a client, status " + label(client.getStatus()));
-		log.info("User id={} added client id={}", principal.userId(), client.getId());
-		return get(client.getId());
 	}
 
 	@Transactional
@@ -178,16 +177,44 @@ public class ClientService {
 		List<Long> ids = rows.stream().map(Client::getId).toList();
 		Map<Long, Long> conversationByClient = new HashMap<>();
 		for (WhatsAppConversation c : conversations.findByClientIdIn(ids)) conversationByClient.putIfAbsent(c.getClientId(), c.getId());
+		// Orders, revenue and the current plan: from the payments, never stored.
+		Map<Long, List<Payment>> paymentsByClient = payments.findByClientIdInAndDeletedAtIsNull(ids).stream()
+			.collect(Collectors.groupingBy(Payment::getClientId));
+		Map<Long, PaymentMethod> methodsById = methods.findAll().stream()
+			.collect(Collectors.toMap(PaymentMethod::getId, Function.identity()));
+		LocalDate today = LocalDate.now(zone);
 
 		return rows.stream().map(client -> {
 			Brand brand = client.getBrandId() == null ? null : brandsById.get(client.getBrandId());
-			String logoUrl = brand == null || brand.getLogo() == null ? null
-				: "/api/brands/" + brand.getId() + "/logo?v=" + brand.getLogoUpdatedAt().toEpochMilli();
+			String logoUrl = brand == null ? null : brand.logoUrl();
+			List<Payment> paid = paymentsByClient.getOrDefault(client.getId(), List.of());
+			Payment latest = paid.stream()
+				.max(Comparator.comparing(Payment::getCreatedAt).thenComparing(Payment::getId)).orElse(null);
+			PaymentMethod method = latest == null ? null : methodsById.get(latest.getPaymentMethodId());
+			BigDecimal revenue = paid.stream().map(Payment::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2);
+			LocalDate end = paid.stream().map(Payment::getEndsOn).max(Comparator.naturalOrder()).orElse(null);
 			return new ClientResponse(client.getId(), client.displayName(), client.getFullName(), client.getUsername(),
 				client.getEmail(), client.getPhone(), client.getCountry(), client.getBrandId(),
 				brand == null ? null : brand.getName(), logoUrl, client.getStatus(), client.getSource(), client.getNote(),
-				conversationByClient.get(client.getId()), client.getCreatedAt(), client.getUpdatedAt());
+				conversationByClient.get(client.getId()), client.getCreatedAt(), client.getUpdatedAt(),
+				paid.size(), revenue,
+				latest == null ? null : latest.getDevices(), latest == null ? null : latest.getMonths(),
+				latest == null ? null : latest.getStartsOn(), end,
+				method == null ? null : method.getProvider().name(), method == null ? null : method.getName(),
+				quarterTrend(paid, today));
 		}).toList();
+	}
+
+	/** Payments in each of the last four calendar quarters, oldest first — the Orders sparkline. */
+	private List<Integer> quarterTrend(List<Payment> paid, LocalDate today) {
+		int[] counts = new int[4];
+		int thisQuarter = today.getYear() * 4 + (today.getMonthValue() - 1) / 3;
+		for (Payment payment : paid) {
+			LocalDate day = payment.getCreatedAt().atZone(zone).toLocalDate();
+			int back = thisQuarter - (day.getYear() * 4 + (day.getMonthValue() - 1) / 3);
+			if (back >= 0 && back < 4) counts[3 - back]++;
+		}
+		return List.of(counts[0], counts[1], counts[2], counts[3]);
 	}
 
 	private Client find(long id) {
@@ -223,7 +250,7 @@ public class ClientService {
 		}
 	}
 
-	/** A client added by hand whose number already writes on WhatsApp gets that conversation. */
+	/** A client whose number changed to one that already writes on WhatsApp gets that conversation. */
 	private void linkConversation(Client client) {
 		if (client.getPhone() == null) return;
 		conversations.findByWaId(client.getPhone().substring(1)).ifPresent(conversation -> {

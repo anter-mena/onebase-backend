@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -47,6 +48,13 @@ public class GlobalExceptionHandler {
 	ResponseEntity<ErrorResponse> handleNotFound(HttpServletRequest request) {
 		return ResponseEntity.status(HttpStatus.NOT_FOUND)
 			.body(ErrorResponse.of(404, "Not Found", "Nothing lives at this address.", request.getRequestURI()));
+	}
+
+	/** The address exists, but not for this method (a POST where only GET is offered): a 405, not a crash. */
+	@ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+	ResponseEntity<ErrorResponse> handleMethodNotAllowed(HttpServletRequest request) {
+		return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+			.body(ErrorResponse.of(405, "Method Not Allowed", "This address does not accept that request.", request.getRequestURI()));
 	}
 
 	@ExceptionHandler(AccessDeniedException.class)

@@ -4,13 +4,17 @@ import com.onebase.actionlog.ActionLog.Action;
 import com.onebase.actionlog.ActionLog.TargetType;
 import com.onebase.actionlog.ActionLogService;
 import com.onebase.common.ApiException;
+import com.onebase.payment.PaymentRepository;
 import com.onebase.paymentmethod.PaymentMethodDtos.PaymentMethodResponse;
 import com.onebase.paymentmethod.PaymentMethodDtos.SavePaymentMethodRequest;
 import com.onebase.security.AuthPrincipal;
 import com.onebase.user.User;
 import com.onebase.user.UserRepository;
+import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,8 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>Decided 2026-10-04: <b>no delete</b> — a method that is switched off can't
  * be chosen for new payments, and old payments keep it. No balance is typed: a
- * new method starts at $0, and its total will come from the payments recorded
- * on it. Everything is USD.
+ * method's balance is the total of the payments recorded on it. Everything is USD.
  *
  * <p>Names are unique without regard to capitals or extra spaces. Every change
  * is written to the Action log, saying what changed.
@@ -37,21 +40,28 @@ public class PaymentMethodService {
 	private final PaymentMethodRepository methods;
 	private final UserRepository users;
 	private final ActionLogService actionLog;
+	private final PaymentRepository payments;
 
-	public PaymentMethodService(PaymentMethodRepository methods, UserRepository users, ActionLogService actionLog) {
+	public PaymentMethodService(PaymentMethodRepository methods, UserRepository users, ActionLogService actionLog,
+			PaymentRepository payments) {
 		this.methods = methods;
 		this.users = users;
 		this.actionLog = actionLog;
+		this.payments = payments;
 	}
 
 	@Transactional(readOnly = true)
 	public List<PaymentMethodResponse> list() {
-		return methods.findAllByOrderByCreatedAtAscIdAsc().stream().map(PaymentMethodResponse::from).toList();
+		Map<Long, BigDecimal> balances = balances();
+		return methods.findAllByOrderByCreatedAtAscIdAsc().stream()
+			.map(method -> PaymentMethodResponse.from(method, balances.getOrDefault(method.getId(), BigDecimal.ZERO)))
+			.toList();
 	}
 
 	@Transactional(readOnly = true)
 	public PaymentMethodResponse get(long id) {
-		return PaymentMethodResponse.from(find(id));
+		PaymentMethod method = find(id);
+		return PaymentMethodResponse.from(method, balances().getOrDefault(method.getId(), BigDecimal.ZERO));
 	}
 
 	@Transactional
@@ -107,6 +117,13 @@ public class PaymentMethodService {
 			method.getId(), method.getName(),
 			active ? "Method switched on: it can be chosen for new payments"
 				: "Method switched off: it can't be chosen for new payments; old payments keep it");
+	}
+
+	/** What each method has received from payments. */
+	private Map<Long, BigDecimal> balances() {
+		Map<Long, BigDecimal> totals = new HashMap<>();
+		for (Object[] row : payments.totalsByMethod()) totals.put((Long) row[0], (BigDecimal) row[1]);
+		return totals;
 	}
 
 	private PaymentMethod find(long id) {

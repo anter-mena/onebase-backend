@@ -5,7 +5,10 @@ import com.onebase.client.Client.Status;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
 
 /** What crosses the wire for the Clients screens. */
 public final class ClientDtos {
@@ -20,6 +23,11 @@ public final class ClientDtos {
 	 * @param country ISO code read from the phone ("MA"), or null when the number doesn't say
 	 * @param brandLogoUrl our own address for the brand's logo, or null
 	 * @param conversationId their WhatsApp conversation, or null when they never wrote
+	 * @param orders, revenue from their payments (deleted ones left out); revenue in USD
+	 * @param devices, months, paymentProvider, paymentMethodName the latest payment's; null before the first
+	 * @param subscriptionStart the latest payment's start; null before the first
+	 * @param subscriptionEnd when their paid time runs out; null before the first payment
+	 * @param orderTrend payments in each of the last four quarters, oldest first
 	 */
 	public record ClientResponse(
 			long id,
@@ -37,11 +45,20 @@ public final class ClientDtos {
 			String note,
 			Long conversationId,
 			Instant createdAt,
-			Instant updatedAt) {
+			Instant updatedAt,
+			long orders,
+			BigDecimal revenue,
+			Integer devices,
+			Integer months,
+			LocalDate subscriptionStart,
+			LocalDate subscriptionEnd,
+			String paymentProvider,
+			String paymentMethodName,
+			List<Integer> orderTrend) {
 	}
 
 	/**
-	 * Add and Edit send the whole left card. The WhatsApp name is not here: it
+	 * Edit sends the whole left card. The WhatsApp name is not here: it
 	 * follows the client's profile. The note has its own call.
 	 */
 	public record SaveClientRequest(

@@ -25,7 +25,7 @@ public class Client {
 	/** Where a client is, in funnel order. */
 	public enum Status { NEW, CALLBACK, TRIAL, PENDING, ACTIVE, INACTIVE, DROP }
 
-	/** Who made the row: a person, or a first WhatsApp message. */
+	/** Who made the row. Only WHATSAPP since 2026-10-06 (no Add client); MANUAL stays allowed by V12. */
 	public enum Source { MANUAL, WHATSAPP }
 
 	@Id
@@ -72,21 +72,6 @@ public class Client {
 	protected Client() {
 	}
 
-	static Client manual(Long createdBy, String fullName, String email, String phone, String country, Long brandId,
-			Status status, String note) {
-		Client client = new Client();
-		client.source = Source.MANUAL;
-		client.createdBy = createdBy;
-		client.fullName = fullName;
-		client.email = email;
-		client.phone = phone;
-		client.country = country;
-		client.brandId = brandId;
-		client.status = status;
-		client.note = note;
-		return client;
-	}
-
 	/** A number that wrote for the first time: New, no brand, named after its WhatsApp profile. */
 	static Client fromWhatsApp(String phone, String country, String username) {
 		Client client = new Client();
@@ -125,6 +110,19 @@ public class Client {
 		}
 		if (changed) touch();
 		return changed;
+	}
+
+	/** A payment: the client is on its brand now, and Active. */
+	public void paid(Long brandId) {
+		this.brandId = brandId;
+		this.status = Status.ACTIVE;
+		touch();
+	}
+
+	/** Their paid time ran out. */
+	public void lapsed() {
+		this.status = Status.INACTIVE;
+		touch();
 	}
 
 	void delete() {

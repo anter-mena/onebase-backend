@@ -15,13 +15,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Configuration → Subscriptions. Admins only — reading too (decided
- * 2026-10-04): `/api/plans` is not in `SecurityConfig.COMMERCIAL_API`. When
- * Commercials record payments, the backend fills in the price itself.
+ * Configuration → Subscriptions. Changing prices: Admins only. Reading: both
+ * roles since 2026-10-06 — the Add payment window prices a payment from the
+ * plans (SecurityConfig).
  */
 @RestController
 @RequestMapping("/api/plans")
-@Tag(name = "Subscriptions", description = "Admins only: the 16 plan prices (1–4 devices × 1, 3, 6, 12 months), in USD")
+@Tag(name = "Subscriptions", description = "Read by both roles; changed by Admins only: the 16 plan prices (1–4 devices × 1, 3, 6, 12 months), in USD")
 public class PlanController {
 
 	private final PlanService planService;
