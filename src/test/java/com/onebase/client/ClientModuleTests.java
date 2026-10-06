@@ -59,6 +59,8 @@ class ClientModuleTests {
 	@Autowired ClientRepository clients;
 	@Autowired WhatsAppConversationRepository conversations;
 	@Autowired ActionLogRepository logs;
+	@Autowired TrialCallbackJob trialJob;
+	@Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
 	@MockitoBean MailService mail;
 	@MockitoBean WhatsAppCloudApi api;
 
@@ -125,13 +127,13 @@ class ClientModuleTests {
 
 		// Edit: a French number now, and Active.
 		mvc.perform(put("/api/clients/" + id).header("Authorization", "Bearer " + commercial).contentType(MediaType.APPLICATION_JSON)
-				.content("{\"fullName\":\"  Sara   Amrani \",\"email\":\"Sara@Example.com\",\"phone\":\"+33 6 12 34 56 78\",\"status\":\"ACTIVE\"}"))
+				.content("{\"fullName\":\"  Sara   Amrani \",\"email\":\"Sara@Example.com\",\"phone\":\"+33 6 12 34 56 78\",\"status\":\"TRIAL\"}"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.name").value("Sara Amrani"))
 			.andExpect(jsonPath("$.email").value("sara@example.com"))
 			.andExpect(jsonPath("$.phone").value("+33612345678"))
 			.andExpect(jsonPath("$.country").value("FR"))
-			.andExpect(jsonPath("$.status").value("ACTIVE"));
+			.andExpect(jsonPath("$.status").value("TRIAL"));
 
 		mvc.perform(put("/api/clients/" + id + "/note").header("Authorization", "Bearer " + commercial)
 				.contentType(MediaType.APPLICATION_JSON).content("{\"note\":\"  Calls after 6pm. \"}"))
@@ -141,7 +143,38 @@ class ClientModuleTests {
 		List<String> details = logs.findAll().stream().filter(l -> Long.valueOf(id).equals(l.getTargetId()))
 			.map(l -> l.getDetail()).toList();
 		assertThat(details).contains("Changed the note");
-		assertThat(details).anyMatch(d -> d.contains("full name") && d.contains("phone") && d.contains("status from New to Active"));
+		assertThat(details).anyMatch(d -> d.contains("full name") && d.contains("phone") && d.contains("status from New to Trial"));
+	}
+
+	@Test
+	void onlyTrialPendingAndDropAreChosenByHandAndTrialsTurnIntoCallbacks() throws Exception {
+		String commercial = token("cl-status@onebase.test", UserRole.COMMERCIAL);
+		webhook(inbound("212611110006", "Tia", "wamid.S1", "Hi"));
+		Client client = clients.findByPhone("+212611110006").orElseThrow();
+		String phone = "\"phone\":\"+212611110006\"";
+		for (String automatic : new String[] { "ACTIVE", "INACTIVE", "CALLBACK" }) {
+			mvc.perform(put("/api/clients/" + client.getId()).header("Authorization", "Bearer " + commercial)
+					.contentType(MediaType.APPLICATION_JSON).content("{" + phone + ",\"status\":\"" + automatic + "\"}"))
+				.andExpect(status().isBadRequest());
+		}
+		// Keeping an automatic status while editing something else is fine.
+		mvc.perform(put("/api/clients/" + client.getId()).header("Authorization", "Bearer " + commercial)
+				.contentType(MediaType.APPLICATION_JSON).content("{" + phone + ",\"fullName\":\"Tia B\",\"status\":\"NEW\"}"))
+			.andExpect(status().isOk());
+		mvc.perform(put("/api/clients/" + client.getId()).header("Authorization", "Bearer " + commercial)
+				.contentType(MediaType.APPLICATION_JSON).content("{" + phone + ",\"fullName\":\"Tia B\",\"status\":\"TRIAL\"}"))
+			.andExpect(status().isOk());
+
+		// Not a day yet: still Trial.
+		trialJob.run();
+		assertThat(clients.findById(client.getId()).orElseThrow().getStatus()).isEqualTo(Client.Status.TRIAL);
+		// A day and a bit later: Callback, and it shows in Renewals.
+		jdbc.update("update clients set status_changed_at = now() - interval '25 hours' where id = ?", client.getId());
+		trialJob.run();
+		assertThat(clients.findById(client.getId()).orElseThrow().getStatus()).isEqualTo(Client.Status.CALLBACK);
+		mvc.perform(get("/api/renewals").header("Authorization", "Bearer " + commercial))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[?(@.client.id == " + client.getId() + ")].group").value("CALLBACK"));
 	}
 
 	@Test

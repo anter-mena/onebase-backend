@@ -28,6 +28,7 @@ public final class ClientDtos {
 	 * @param subscriptionStart the latest payment's start; null before the first
 	 * @param subscriptionEnd when their paid time runs out; null before the first payment
 	 * @param orderTrend payments in each of the last four quarters, oldest first
+	 * @param statusChangedAt when the status last changed (a trial's start)
 	 */
 	public record ClientResponse(
 			long id,
@@ -54,7 +55,18 @@ public final class ClientDtos {
 			LocalDate subscriptionEnd,
 			String paymentProvider,
 			String paymentMethodName,
-			List<Integer> orderTrend) {
+			List<Integer> orderTrend,
+			Instant statusChangedAt) {
+	}
+
+	/**
+	 * One row of Renewals.
+	 *
+	 * @param group ENDING_SOON (Active, 10 days or less left), CALLBACK (trial over),
+	 *     PENDING (waiting for their payment) or INACTIVE (plan ended)
+	 * @param daysLeft days until the paid time ends — negative once it has; null without a plan
+	 */
+	public record RenewalRow(ClientResponse client, String group, Long daysLeft) {
 	}
 
 	/**

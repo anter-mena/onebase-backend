@@ -66,7 +66,7 @@ class UserModuleTests {
 			.andExpect(jsonPath("$.message").value("You do not have permission to do that."));
 		// Areas not built yet still answer by role: Admin-only by default, Commercial areas let through.
 		mvc.perform(get("/api/dashboard").header("Authorization", "Bearer " + token)).andExpect(status().isForbidden());
-		mvc.perform(get("/api/renewals").header("Authorization", "Bearer " + token)).andExpect(status().isNotFound());
+		mvc.perform(get("/api/renewals").header("Authorization", "Bearer " + token)).andExpect(status().isOk());
 		mvc.perform(get("/api/clients").header("Authorization", "Bearer " + token)).andExpect(status().isOk());
 		mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
 			.andExpect(status().isOk())

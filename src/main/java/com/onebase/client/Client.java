@@ -22,8 +22,24 @@ import java.time.Instant;
 @Table(name = "clients")
 public class Client {
 
-	/** Where a client is, in funnel order. */
-	public enum Status { NEW, CALLBACK, TRIAL, PENDING, ACTIVE, INACTIVE, DROP }
+	/**
+	 * Where a client is, in funnel order (decided 2026-10-06):
+	 * NEW — wrote on WhatsApp, got nothing yet (automatic);
+	 * TRIAL — given a trial (manual);
+	 * CALLBACK — the trial started more than 24 hours ago (automatic);
+	 * PENDING — will pay, we are waiting (manual);
+	 * ACTIVE — has a current plan (automatic: a payment);
+	 * INACTIVE — the plan ended and was not renewed (automatic);
+	 * DROP — lost (manual).
+	 */
+	public enum Status {
+		NEW, CALLBACK, TRIAL, PENDING, ACTIVE, INACTIVE, DROP;
+
+		/** The ones a person may choose; the rest follow from messages, trials and payments. */
+		public boolean manual() {
+			return this == TRIAL || this == PENDING || this == DROP;
+		}
+	}
 
 	/** Who made the row. Only WHATSAPP since 2026-10-06 (no Add client); MANUAL stays allowed by V12. */
 	public enum Source { MANUAL, WHATSAPP }
@@ -57,6 +73,10 @@ public class Client {
 	@Column(columnDefinition = "text")
 	private String note;
 
+	/** When the status last changed: a trial's start, a lapse's day. */
+	@Column(name = "status_changed_at", nullable = false)
+	private Instant statusChangedAt = Instant.now();
+
 	@Column(name = "created_by", updatable = false)
 	private Long createdBy;
 
@@ -88,7 +108,7 @@ public class Client {
 		this.phone = phone;
 		this.country = country;
 		this.brandId = brandId;
-		this.status = status;
+		setStatus(status);
 		touch();
 	}
 
@@ -115,14 +135,26 @@ public class Client {
 	/** A payment: the client is on its brand now, and Active. */
 	public void paid(Long brandId) {
 		this.brandId = brandId;
-		this.status = Status.ACTIVE;
+		setStatus(Status.ACTIVE);
 		touch();
 	}
 
 	/** Their paid time ran out. */
 	public void lapsed() {
-		this.status = Status.INACTIVE;
+		setStatus(Status.INACTIVE);
 		touch();
+	}
+
+	/** The trial has run for a day: time to call them back. */
+	public void trialEnded() {
+		setStatus(Status.CALLBACK);
+		touch();
+	}
+
+	private void setStatus(Status next) {
+		if (next == status) return;
+		status = next;
+		statusChangedAt = Instant.now();
 	}
 
 	void delete() {
@@ -149,6 +181,7 @@ public class Client {
 	public String getCountry() { return country; }
 	public Long getBrandId() { return brandId; }
 	public Status getStatus() { return status; }
+	public Instant getStatusChangedAt() { return statusChangedAt; }
 	public Source getSource() { return source; }
 	public String getNote() { return note; }
 	public Long getCreatedBy() { return createdBy; }

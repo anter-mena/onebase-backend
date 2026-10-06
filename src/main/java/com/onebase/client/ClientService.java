@@ -101,6 +101,10 @@ public class ClientService {
 		if (phone == null && request.email() == null) throw ApiException.badRequest(NEEDS_CONTACT);
 		refuseTaken(phone, client.getId());
 		Long brandId = usableBrand(request.brandId(), client.getBrandId());
+		// Only Trial, Pending and Drop are chosen by a person; keeping the current one is fine.
+		if (request.status() != client.getStatus() && !request.status().manual()) {
+			throw ApiException.badRequest(label(request.status()) + " is set by One Base: choose Trial, Pending or Drop.");
+		}
 
 		List<String> changed = new ArrayList<>();
 		if (!Objects.equals(client.getFullName(), request.fullName())) changed.add("full name");
@@ -143,6 +147,36 @@ public class ClientService {
 		actionLog.record(actor(principal), Action.DELETED, TargetType.CLIENT, client.getId(), client.displayName(),
 			"Deleted the client; their past payments still count");
 		log.info("User id={} deleted client id={}", principal.userId(), client.getId());
+	}
+
+	// ── Renewals ──────────────────────────────────────────────────────────────
+
+	/** Days before the end that a client shows in Renewals. */
+	static final long ENDING_SOON_DAYS = 10;
+
+	/**
+	 * The people to follow up (decided 2026-10-06): Active with 10 days or less left
+	 * (or already past, before the hourly job catches up), every Callback, every
+	 * Pending, every Inactive. Soonest first within each group.
+	 */
+	@Transactional(readOnly = true)
+	public List<ClientDtos.RenewalRow> renewals() {
+		LocalDate today = LocalDate.now(zone);
+		List<ClientDtos.RenewalRow> rows = new ArrayList<>();
+		for (ClientResponse client : list()) {
+			Long daysLeft = client.subscriptionEnd() == null ? null
+				: java.time.temporal.ChronoUnit.DAYS.between(today, client.subscriptionEnd());
+			String group = switch (client.status()) {
+				case ACTIVE -> daysLeft != null && daysLeft <= ENDING_SOON_DAYS ? "ENDING_SOON" : null;
+				case CALLBACK -> "CALLBACK";
+				case PENDING -> "PENDING";
+				case INACTIVE -> "INACTIVE";
+				default -> null;
+			};
+			if (group != null) rows.add(new ClientDtos.RenewalRow(client, group, daysLeft));
+		}
+		rows.sort(Comparator.comparing((ClientDtos.RenewalRow row) -> row.daysLeft() == null ? Long.MAX_VALUE : row.daysLeft()));
+		return rows;
 	}
 
 	// ── WhatsApp ──────────────────────────────────────────────────────────────
@@ -201,7 +235,7 @@ public class ClientService {
 				latest == null ? null : latest.getDevices(), latest == null ? null : latest.getMonths(),
 				latest == null ? null : latest.getStartsOn(), end,
 				method == null ? null : method.getProvider().name(), method == null ? null : method.getName(),
-				quarterTrend(paid, today));
+				quarterTrend(paid, today), client.getStatusChangedAt());
 		}).toList();
 	}
 

@@ -151,6 +151,32 @@ class PaymentModuleTests {
 			.andExpect(jsonPath("$.message").value("Choose a brand that is switched on."));
 	}
 
+	@Test
+	void renewalsShowWhoEndsWithinTenDaysAndWhoEnded() throws Exception {
+		String commercial = token("pay-renew@onebase.test", UserRole.COMMERCIAL);
+		long brandId = brand("Renew Brand", "renewbrand.test");
+		long method = method("PAYPAL", "Renew PayPal");
+		long soon = whatsAppClient("212622220010");
+		long later = whatsAppClient("212622220011");
+		long ended = whatsAppClient("212622220012");
+		for (long id : new long[] { soon, later, ended }) {
+			pay(commercial, id, "NEW_PLAN", 1, 1, "10", brandId, method, null, 0).andExpect(status().isCreated());
+		}
+		LocalDate today = LocalDate.now(ZoneId.of("America/Toronto"));
+		jdbc.update("update payments set ends_on = ? where client_id = ?", today.plusDays(10), soon);
+		jdbc.update("update payments set ends_on = ? where client_id = ?", today.plusDays(11), later);
+		jdbc.update("update payments set starts_on = ?, ends_on = ? where client_id = ?", today.minusDays(40), today.minusDays(3), ended);
+		jdbc.update("update clients set status = 'INACTIVE' where id = ?", ended);
+
+		String body = mvc.perform(get("/api/renewals").header("Authorization", "Bearer " + commercial))
+			.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+		assertThat(JsonPath.<java.util.List<String>>read(body, "$[?(@.client.id == " + soon + ")].group")).containsExactly("ENDING_SOON");
+		assertThat(JsonPath.<java.util.List<Integer>>read(body, "$[?(@.client.id == " + soon + ")].daysLeft")).containsExactly(10);
+		assertThat(JsonPath.<java.util.List<String>>read(body, "$[?(@.client.id == " + later + ")].group")).isEmpty();
+		assertThat(JsonPath.<java.util.List<String>>read(body, "$[?(@.client.id == " + ended + ")].group")).containsExactly("INACTIVE");
+		assertThat(JsonPath.<java.util.List<Integer>>read(body, "$[?(@.client.id == " + ended + ")].daysLeft")).containsExactly(-3);
+	}
+
 	// ── Helpers ─────────────────────────────────────────────────────────
 
 	private ResultActions pay(String token, long clientId, String kind, int devices, int months, String amount, long brandId,
