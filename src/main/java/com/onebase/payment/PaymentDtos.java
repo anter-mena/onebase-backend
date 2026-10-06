@@ -48,6 +48,14 @@ public final class PaymentDtos {
 			Instant createdAt) {
 	}
 
+	/** One Ledger line: a payment, and whose it is. */
+	public record LedgerRow(PaymentResponse payment, long clientId, String clientName) {
+	}
+
+	/** The Ledger for a period, newest first; `methodId` when filtered to one account. */
+	public record Ledger(String range, LocalDate start, LocalDate end, Long methodId, List<LedgerRow> rows) {
+	}
+
 	/** A payment just added, and a warning when it took the panel credit below zero. */
 	public record CreatedPayment(PaymentResponse payment, String warning) {
 	}

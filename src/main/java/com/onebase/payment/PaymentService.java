@@ -157,6 +157,27 @@ public class PaymentService {
 				+ "; its credits came back");
 	}
 
+	/**
+	 * The Ledger (decided 2026-10-06): every payment received in the period, newest
+	 * first, optionally only those paid to one account. Admins only (SecurityConfig).
+	 */
+	@Transactional(readOnly = true)
+	public PaymentDtos.Ledger ledger(Long methodId, String range, String from, String to) {
+		com.onebase.seo.SeoPeriod period = com.onebase.seo.SeoPeriod.of(range, from, to, LocalDate.now(zone));
+		List<Payment> rows = payments.findByDeletedAtIsNullAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(
+			period.start().atStartOfDay(zone).toInstant(), period.end().plusDays(1).atStartOfDay(zone).toInstant());
+		if (methodId != null) rows = rows.stream().filter(p -> methodId.equals(p.getPaymentMethodId())).toList();
+		Map<Long, Client> owners = clients.findAllById(rows.stream().map(Payment::getClientId).distinct().toList()).stream()
+			.collect(Collectors.toMap(Client::getId, Function.identity()));
+		List<PaymentResponse> views = views(rows);
+		List<PaymentDtos.LedgerRow> lines = new ArrayList<>();
+		for (int i = 0; i < rows.size(); i++) {
+			Client owner = owners.get(rows.get(i).getClientId());
+			lines.add(new PaymentDtos.LedgerRow(views.get(i), rows.get(i).getClientId(), owner == null ? "—" : owner.displayName()));
+		}
+		return new PaymentDtos.Ledger(period.range(), period.start(), period.end(), methodId, lines);
+	}
+
 	// ── Helpers ───────────────────────────────────────────────────────────────
 
 	private List<PaymentResponse> views(List<Payment> rows) {

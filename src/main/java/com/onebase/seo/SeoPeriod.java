@@ -23,7 +23,8 @@ public record SeoPeriod(String range, LocalDate start, LocalDate end, LocalDate 
 	/** GA4 keeps nothing older than its launch. */
 	static final LocalDate EARLIEST = LocalDate.of(2015, 8, 14);
 
-	static SeoPeriod of(String range, String from, String to, LocalDate today) {
+	/** Also the Dashboard's and the Ledger's period (decided 2026-10-06: the same filter). */
+	public static SeoPeriod of(String range, String from, String to, LocalDate today) {
 		String r = range == null || range.isBlank() ? "7d" : range.trim().toLowerCase();
 		return switch (r) {
 			case "today" -> span("today", today, today);
@@ -61,7 +62,7 @@ public record SeoPeriod(String range, LocalDate start, LocalDate end, LocalDate 
 		return new SeoPeriod(range, start, end, start.minusDays(days), start.minusDays(1), step);
 	}
 
-	long days() {
+	public long days() {
 		return ChronoUnit.DAYS.between(start, end) + 1;
 	}
 

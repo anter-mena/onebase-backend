@@ -28,6 +28,17 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
 	@Query("select p.paymentMethodId, sum(p.amount) from Payment p where p.deletedAt is null group by p.paymentMethodId")
 	List<Object[]> totalsByMethod();
 
+	/** Payments recorded between two moments (the Dashboard and the Ledger). */
+	List<Payment> findByDeletedAtIsNullAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(
+			java.time.Instant from, java.time.Instant to);
+
+	/** Every payment, newest first (the Dashboard's all-time figures). */
+	List<Payment> findByDeletedAtIsNull();
+
+	/** How many clients had paid time running on a day: the Active count back then. */
+	@Query("select count(distinct p.clientId) from Payment p where p.deletedAt is null and p.startsOn <= :day and p.endsOn > :day")
+	long clientsCoveredOn(@Param("day") LocalDate day);
+
 	/** Clients whose paid time has run out: the ids. */
 	@Query("select p.clientId from Payment p where p.deletedAt is null group by p.clientId having max(p.endsOn) < :today")
 	List<Long> clientsEndedBefore(@Param("today") LocalDate today);
