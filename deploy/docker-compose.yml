@@ -74,10 +74,73 @@ services:
       db:
         condition: service_healthy
     ports:
-      # Public for now so the deploy can be checked from a browser.
-      # HTTPS (Caddy) will sit in front and close this port — see BugForLater.md.
-      - "8080:8080"
+      # BACKEND_BIND comes from site.env. Unset = public (the old VPS, until the move).
+      # 127.0.0.1 = only this machine: deploy.sh's health check; the world goes through Caddy.
+      # Docker ignores ufw for published ports, so this is what actually closes 8080.
+      - "${BACKEND_BIND:-0.0.0.0}:8080:8080"
     mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # HTTPS in front of the backend. Gets and renews the Let's Encrypt certificate for
+  # API_DOMAIN by itself. Only runs where site.env turns on the "https" profile.
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: onebase-caddy
+    profiles: ["https"]
+    restart: unless-stopped
+    environment:
+      - API_DOMAIN=${API_DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The certificates. Kept across redeploys so Let's Encrypt is not asked again.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # One database dump a day into /opt/onebase/backups, the last 14 kept.
+  # Restore: pg_restore -h db -U <user> -d <db> --clean <file>.dump
+  # Only runs where site.env turns on the "backup" profile.
+  backup:
+    image: postgres:16-alpine
+    container_name: onebase-backup
+    profiles: ["backup"]
+    restart: unless-stopped
+    env_file: db.env
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        export PGPASSWORD="$$POSTGRES_PASSWORD"
+        while true; do
+          file="/backups/onebase-$$(date +%F).dump"
+          if pg_dump -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc -f "$$file.tmp"; then
+            mv "$$file.tmp" "$$file" && echo "Backup written: $$file"
+          else
+            rm -f "$$file.tmp"; echo "Backup FAILED"
+          fi
+          find /backups -name 'onebase-*.dump' -mtime +14 -delete
+          sleep 86400
+        done
+    mem_limit: 256m
     logging:
       driver: json-file
       options:
@@ -86,3 +149,5 @@ services:
 
 volumes:
   onebase_db:
+  caddy_data:
+  caddy_config:

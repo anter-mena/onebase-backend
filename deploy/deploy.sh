@@ -6,7 +6,11 @@ set -euo pipefail
 IMAGE="$1"
 cd /opt/onebase
 
+# .env = the image to run + this server's own settings (site.env, see site.env.example).
 echo "BACKEND_IMAGE=${IMAGE}" > .env
+if [ -f site.env ]; then
+  cat site.env >> .env
+fi
 docker compose pull
 docker compose up -d --remove-orphans
 docker image prune -f

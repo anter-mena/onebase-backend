@@ -71,8 +71,8 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           echo "${{ secrets.VPS_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
 
-      - name: Copy compose file
-        run: scp deploy/docker-compose.yml "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/onebase/docker-compose.yml"
+      - name: Copy compose file and Caddyfile
+        run: scp deploy/docker-compose.yml deploy/Caddyfile "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/onebase/"
 
       - name: Log the VPS in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | ssh "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "docker login ghcr.io -u ${{ github.actor }} --password-stdin"

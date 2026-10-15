@@ -1,0 +1,8 @@
+# HTTPS for the backend. API_DOMAIN comes from site.env (e.g. api.onebase.live).
+# Caddy gets the certificate itself; the DNS record must point at this VPS first.
+{$API_DOMAIN} {
+	encode zstd gzip
+	# Caddy sets X-Forwarded-For to the real client IP and ignores what the client sent,
+	# so the IP in the action log and the sessions list can no longer be faked.
+	reverse_proxy backend:8080
+}
