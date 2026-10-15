@@ -9,6 +9,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,6 +69,13 @@ public class WhatsAppCloudApi {
 		media.put("id", mediaId);
 		if (caption != null && !caption.isBlank() && !kind.equals("audio")) media.put("caption", caption);
 		if (kind.equals("document") && filename != null) media.put("filename", filename);
+		return messageId(post(messagesUrl(), body));
+	}
+
+	/** A message with buttons; {@code interactive} is WhatsApp's {@code interactive} object (see {@link TemplateMessages}). */
+	public String sendInteractive(String to, Map<String, Object> interactive) {
+		ObjectNode body = base(to, "interactive");
+		body.set("interactive", json.valueToTree(interactive));
 		return messageId(post(messagesUrl(), body));
 	}
 

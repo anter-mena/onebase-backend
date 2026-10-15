@@ -1,6 +1,8 @@
 package com.onebase.whatsapp;
 
 import com.onebase.security.AuthPrincipal;
+import com.onebase.template.TemplateController;
+import com.onebase.template.TemplateDtos.TemplateResponse;
 import com.onebase.whatsapp.WhatsAppService.ConversationView;
 import com.onebase.whatsapp.WhatsAppService.MessageView;
 import com.onebase.whatsapp.WhatsAppService.StatusView;
@@ -74,6 +76,27 @@ public class WhatsAppController {
 	public MessageView file(@AuthenticationPrincipal AuthPrincipal user, @PathVariable long id,
 			@RequestPart("file") MultipartFile file, @RequestParam(required = false) String caption) {
 		return service.sendFile(user, id, file, caption);
+	}
+
+	@GetMapping("/templates")
+	@Operation(summary = "The saved templates the composer offers (active ones), newest change first")
+	public List<TemplateResponse> templates() {
+		return service.templates();
+	}
+
+	@GetMapping("/templates/files/{fileId}")
+	@Operation(summary = "A file of an active template, for the picker's preview", description = "404 for a file no active template uses.")
+	public ResponseEntity<byte[]> templateFile(@PathVariable long fileId) {
+		return TemplateController.serve(service.templateFile(fileId));
+	}
+
+	@PostMapping("/conversations/{id}/templates/{templateId}")
+	@Operation(summary = "Send a saved template", description = "Its texts, files and buttons go out as normal messages, in order "
+		+ "(can take ~10 s); returns the messages created. 409 when the 24-hour window is closed; 400 if the template is switched off. "
+		+ "Stops at the first failure.")
+	public List<MessageView> sendSavedTemplate(@AuthenticationPrincipal AuthPrincipal user, @PathVariable long id,
+			@PathVariable long templateId) {
+		return service.sendSavedTemplate(user, id, templateId);
 	}
 
 	@GetMapping("/messages/{id}/media")

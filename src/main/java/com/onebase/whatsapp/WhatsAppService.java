@@ -3,14 +3,20 @@ package com.onebase.whatsapp;
 import com.onebase.client.ClientService;
 import com.onebase.common.ApiException;
 import com.onebase.security.AuthPrincipal;
+import com.onebase.template.TemplateDtos.TemplateResponse;
+import com.onebase.template.TemplateService;
+import com.onebase.template.TemplateService.FileData;
+import com.onebase.template.TemplateService.Sendable;
 import com.onebase.whatsapp.WhatsAppMessage.Direction;
 import com.onebase.whatsapp.WhatsAppMessage.Status;
 import com.onebase.whatsapp.WhatsAppMessage.Type;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -26,6 +32,9 @@ import tools.jackson.databind.JsonNode;
  * <p><b>The 24-hour rule.</b> Free text and files only within 24 hours of the
  * client's last message; after that WhatsApp accepts only an approved template,
  * which this screen offers instead (Meta's "hello_world" on the test number).
+ *
+ * <p><b>Saved templates</b> (Communication → Templates) are not Meta's: they go out as
+ * normal messages, so only inside the window too (see {@link TemplateMessages}).
  */
 @Service
 public class WhatsAppService {
@@ -33,6 +42,9 @@ public class WhatsAppService {
 	private static final Logger log = LoggerFactory.getLogger(WhatsAppService.class);
 	static final Duration WINDOW = Duration.ofHours(24);
 	static final int MAX_TEXT = 4096;
+	/** Between the pieces of a saved template, so the phone receives them in order. */
+	static final Duration AFTER_TEXT = Duration.ofSeconds(1);
+	static final Duration AFTER_FILE = Duration.ofSeconds(3);
 
 	public record ConversationView(long id, String waId, String phone, String name, int unread, Instant lastMessageAt,
 			String preview, boolean windowOpen, Instant windowEndsAt, Long clientId) {
@@ -50,14 +62,16 @@ public class WhatsAppService {
 	private final WhatsAppCloudApi api;
 	private final WhatsAppSettings settings;
 	private final ClientService clients;
+	private final TemplateService templates;
 
 	public WhatsAppService(WhatsAppConversationRepository conversations, WhatsAppMessageRepository messages,
-			WhatsAppCloudApi api, WhatsAppSettings settings, ClientService clients) {
+			WhatsAppCloudApi api, WhatsAppSettings settings, ClientService clients, TemplateService templates) {
 		this.conversations = conversations;
 		this.messages = messages;
 		this.api = api;
 		this.settings = settings;
 		this.clients = clients;
+		this.templates = templates;
 	}
 
 	// ── What Meta sends us ─────────────────────────────────────────────────────
@@ -240,6 +254,85 @@ public class WhatsAppService {
 			message.uploaded(mediaId);
 			return api.sendMedia(conversation.getWaId(), kind, mediaId, text, name);
 		});
+	}
+
+	// ── Saved templates ────────────────────────────────────────────────────────
+
+	/** The templates the composer offers: the active ones. */
+	public List<TemplateResponse> templates() {
+		return templates.listActive();
+	}
+
+	/** A file of an active template, for the picker's preview. */
+	public FileData templateFile(long fileId) {
+		return templates.activeFile(fileId);
+	}
+
+	/**
+	 * Sends a saved template as the messages {@link TemplateMessages} makes of it, in order,
+	 * each saved like any other send. A short pause after each piece keeps them in order on
+	 * the phone. Stops at the first failure: that message is saved FAILED and its error
+	 * returned; the ones before it stay sent.
+	 */
+	public List<MessageView> sendSavedTemplate(AuthPrincipal user, long conversationId, long templateId) {
+		WhatsAppConversation conversation = find(conversationId);
+		Sendable template = templates.forSending(templateId);
+		requireWindow(conversation);
+		List<TemplateMessages.Outgoing> pieces = TemplateMessages.build(template.blocks(), template.footer());
+		List<MessageView> sent = new ArrayList<>();
+		for (int i = 0; i < pieces.size(); i++) {
+			TemplateMessages.Outgoing piece = pieces.get(i);
+			sent.add(sendPiece(user, conversation, piece, template.files()));
+			if (i < pieces.size() - 1) pause(hasFile(piece) ? AFTER_FILE : AFTER_TEXT);
+		}
+		log.info("User id={} sent template id={} to conversation id={} ({} messages)", user.userId(), templateId,
+			conversationId, sent.size());
+		return sent;
+	}
+
+	private MessageView sendPiece(AuthPrincipal user, WhatsAppConversation conversation, TemplateMessages.Outgoing piece,
+			Map<Long, FileData> files) {
+		String to = conversation.getWaId();
+		long id = conversation.getId();
+		return switch (piece) {
+			case TemplateMessages.Text text -> {
+				WhatsAppMessage message = messages.save(WhatsAppMessage.outgoing(id, Type.TEXT, text.body(), null, null, null, user.userId()));
+				yield deliver(conversation, message, () -> api.sendText(to, text.body()));
+			}
+			case TemplateMessages.Media media -> {
+				FileData file = files.get(media.fileId());
+				WhatsAppMessage message = messages.save(WhatsAppMessage.outgoing(id, Type.valueOf(media.type().name()),
+					media.caption(), null, file.mime(), file.filename(), user.userId()));
+				yield deliver(conversation, message, () -> {
+					String mediaId = api.upload(file.bytes(), file.mime(), file.filename());
+					message.uploaded(mediaId);
+					return api.sendMedia(to, media.kind(), mediaId, media.caption(), file.filename());
+				});
+			}
+			case TemplateMessages.Interactive interactive -> {
+				// Kept as a text: the words, then a line "[Label]" per button.
+				WhatsAppMessage message = messages.save(WhatsAppMessage.outgoing(id, Type.TEXT, interactive.shown(), null,
+					null, null, user.userId()));
+				yield deliver(conversation, message, () -> {
+					FileData header = interactive.header() == null ? null : files.get(interactive.header().fileId());
+					String headerId = header == null ? null : api.upload(header.bytes(), header.mime(), header.filename());
+					return api.sendInteractive(to, interactive.payload(headerId, header == null ? null : header.filename()));
+				});
+			}
+		};
+	}
+
+	private static boolean hasFile(TemplateMessages.Outgoing piece) {
+		return piece instanceof TemplateMessages.Media
+			|| (piece instanceof TemplateMessages.Interactive interactive && interactive.header() != null);
+	}
+
+	private static void pause(Duration duration) {
+		try {
+			Thread.sleep(duration);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
 	}
 
 	public WhatsAppCloudApi.MediaFile media(long messageId) {
