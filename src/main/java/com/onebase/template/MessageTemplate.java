@@ -11,6 +11,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OrderColumn;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -55,10 +56,18 @@ public class MessageTemplate {
 	private Long updatedBy;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
-	private Instant createdAt = Instant.now();
+	private Instant createdAt = now();
 
 	@Column(name = "updated_at", nullable = false)
-	private Instant updatedAt = Instant.now();
+	private Instant updatedAt = now();
+
+	/**
+	 * The time to the microsecond, what Postgres keeps: the answer to a save then shows
+	 * the same {@code updatedAt} as every later read of it.
+	 */
+	private static Instant now() {
+		return Instant.now().truncatedTo(ChronoUnit.MICROS);
+	}
 
 	protected MessageTemplate() {
 	}
@@ -76,7 +85,7 @@ public class MessageTemplate {
 		this.blocks.clear();
 		this.blocks.addAll(blocks);
 		this.updatedBy = by;
-		this.updatedAt = Instant.now();
+		this.updatedAt = now();
 	}
 
 	void setActive(boolean active) {
