@@ -15,6 +15,11 @@ docker compose pull
 docker compose up -d --remove-orphans
 docker image prune -f
 
+# A changed Caddyfile does not restart Caddy by itself: reload it, when it runs here.
+if docker compose ps --status running --services | grep -qx caddy; then
+  docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+fi
+
 # Wait for Spring Boot to report healthy; fail the deploy if it never does.
 # Up to 90 s: the database has to be ready and Flyway may run migrations first.
 for _ in $(seq 1 45); do
