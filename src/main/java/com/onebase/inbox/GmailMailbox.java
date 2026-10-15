@@ -474,7 +474,9 @@ public class GmailMailbox {
 			m.isSet(Flags.Flag.SEEN),
 			m.isSet(Flags.Flag.FLAGGED),
 			userLabels(m.getLabels()),
-			Arrays.asList(m.getLabels() == null ? new String[0] : m.getLabels()).contains("\\Sent"),
+			// Gmail leaves out the label of the folder being read: inside Sent, \Sent is
+			// never there, though everything in it went out from this mailbox.
+			key == FolderKey.SENT || Arrays.asList(m.getLabels() == null ? new String[0] : m.getLabels()).contains("\\Sent"),
 			content,
 			m.getMessageID(),
 			firstHeader(m, "In-Reply-To"),
