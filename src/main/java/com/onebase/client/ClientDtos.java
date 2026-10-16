@@ -21,7 +21,7 @@ public final class ClientDtos {
 	 *
 	 * @param name what the screens call them: the full name, else the WhatsApp name, else the phone
 	 * @param country ISO code read from the phone ("MA"), or null when the number doesn't say
-	 * @param brandLogoUrl our own address for the brand's logo, or null
+	 * @param brandLogoUrl the brand logo's address on its own site, or null
 	 * @param conversationId their WhatsApp conversation, or null when they never wrote
 	 * @param orders, revenue from their payments (deleted ones left out); revenue in USD
 	 * @param devices, months, paymentProvider, paymentMethodName the latest payment's; null before the first

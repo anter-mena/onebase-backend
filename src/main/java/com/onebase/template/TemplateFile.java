@@ -12,7 +12,7 @@ import org.hibernate.type.SqlTypes;
 
 /**
  * A photo, PDF or audio of a template (table {@code message_template_files}). Kept in
- * the database, like brand logos, so it is backed up with it. The type is the one read
+ * the database, so it is backed up with it. The type is the one read
  * from the bytes on upload ({@link TemplateRules#sniff}), never the one the browser said.
  *
  * <p>Uploaded before the template is saved; one that no template uses is deleted after

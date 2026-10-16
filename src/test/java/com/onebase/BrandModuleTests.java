@@ -6,7 +6,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -15,13 +14,6 @@ import com.onebase.mail.MailService;
 import com.onebase.user.User;
 import com.onebase.user.UserRepository;
 import com.onebase.user.UserRole;
-import java.awt.Color;
-import java.awt.Graphics2D;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.util.Base64;
-import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -62,7 +54,8 @@ class BrandModuleTests {
 	void addWithALogoThenTheSameSiteIsRefused() throws Exception {
 		String admin = token("brand-admin-1@onebase.test", UserRole.ADMIN);
 		String body = save(admin, null, "https://www.alpha-brand.test/en", "Alpha",
-			"{\"instagram\":\"instagram.com/alpha/\",\"x\":\"https://twitter.com/alpha\"}", dataUrl(600, 300))
+			"{\"instagram\":\"instagram.com/alpha/\",\"x\":\"https://twitter.com/alpha\"}",
+				"https://www.alpha-brand.test/apple-touch-icon.png")
 			.andExpect(status().isCreated())
 			.andExpect(jsonPath("$.domain").value("alpha-brand.test"))
 			.andExpect(jsonPath("$.websiteUrl").value("https://www.alpha-brand.test"))
@@ -72,14 +65,12 @@ class BrandModuleTests {
 			.andExpect(jsonPath("$.clients").value(0))
 			.andReturn().getResponse().getContentAsString();
 
-		// The logo we stored is a small PNG, served publicly, never as a page.
-		String logoUrl = JsonPath.read(body, "$.logoUrl");
-		byte[] png = mvc.perform(get(logoUrl))
-			.andExpect(status().isOk())
-			.andExpect(header().string("Content-Type", "image/png"))
-			.andExpect(header().string("X-Content-Type-Options", "nosniff"))
-			.andReturn().getResponse().getContentAsByteArray();
-		assertThat(ImageIO.read(new ByteArrayInputStream(png)).getWidth()).isEqualTo(128);
+		// Only the logo's address is kept, as it was given: screens load it from the brand's site.
+		assertThat((String) JsonPath.read(body, "$.logoUrl")).isEqualTo("https://www.alpha-brand.test/apple-touch-icon.png");
+
+		// Anything but a web address is refused.
+		save(admin, null, "alpha-two.test", "Alpha Two", "{}", "javascript:alert(1)")
+			.andExpect(status().isBadRequest());
 
 		// Same site, written differently: refused, naming the brand that has it.
 		save(admin, null, "alpha-brand.test", "Alpha again", "{}", null)
@@ -93,10 +84,11 @@ class BrandModuleTests {
 		String token = login(admin.getEmail());
 		long id = idOf(save(token, null, "beta-brand.test", "Beta", "{}", null).andExpect(status().isCreated()));
 
-		save(token, id, "beta-brand.test", "Beta Shop", "{\"tiktok\":\"https://www.tiktok.com/@beta\"}", dataUrl(64, 64))
+		save(token, id, "beta-brand.test", "Beta Shop", "{\"tiktok\":\"https://www.tiktok.com/@beta\"}",
+				"https://beta-brand.test/logo.png")
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.name").value("Beta Shop"))
-			.andExpect(jsonPath("$.logoUrl").isNotEmpty());
+			.andExpect(jsonPath("$.logoUrl").value("https://beta-brand.test/logo.png"));
 
 		mvc.perform(patch("/api/brands/" + id + "/status").header("Authorization", "Bearer " + token)
 				.contentType(MediaType.APPLICATION_JSON).content("{\"active\":false}"))
@@ -143,8 +135,8 @@ class BrandModuleTests {
 		save(admin, null, "epsilon-brand.test", "Epsilon", "{\"instagram\":\"https://evil.test/epsilon\"}", null)
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.message").value("The Instagram link is not an account on Instagram."));
-		save(admin, null, "epsilon-brand.test", "Epsilon", "{}",
-				"data:image/png;base64," + Base64.getEncoder().encodeToString("<svg onload=alert(1)>".getBytes()))
+		// A logo is an address on the web, never a file or a script.
+		save(admin, null, "epsilon-brand.test", "Epsilon", "{}", "data:image/svg+xml,<svg onload=alert(1)>")
 			.andExpect(status().isBadRequest());
 		save(admin, null, "not a website", "Epsilon", "{}", null).andExpect(status().isBadRequest());
 	}
@@ -174,10 +166,10 @@ class BrandModuleTests {
 
 		// ── Helpers ─────────────────────────────────────────────────────────
 
-	private ResultActions save(String token, Long id, String website, String name, String socialsJson, String logo)
+	private ResultActions save(String token, Long id, String website, String name, String socialsJson, String logoUrl)
 			throws Exception {
 		String body = "{\"websiteUrl\":\"" + website + "\",\"name\":\"" + name + "\",\"socials\":" + socialsJson
-			+ (logo == null ? "" : ",\"logo\":\"" + logo + "\"") + "}";
+			+ (logoUrl == null ? "" : ",\"logoUrl\":\"" + logoUrl + "\"") + "}";
 		var request = id == null ? post("/api/brands") : put("/api/brands/" + id);
 		return mvc.perform(request.header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content(body));
 	}
@@ -204,16 +196,5 @@ class BrandModuleTests {
 				.content("{\"email\":\"" + email + "\",\"password\":\"user-password\"}"))
 			.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
 		return JsonPath.read(body, "$.accessToken");
-	}
-
-	private static String dataUrl(int width, int height) throws Exception {
-		BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-		Graphics2D g = image.createGraphics();
-		g.setColor(Color.BLUE);
-		g.fillRect(0, 0, width, height);
-		g.dispose();
-		ByteArrayOutputStream out = new ByteArrayOutputStream();
-		ImageIO.write(image, "png", out);
-		return "data:image/png;base64," + Base64.getEncoder().encodeToString(out.toByteArray());
 	}
 }

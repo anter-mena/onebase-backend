@@ -23,7 +23,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * The WhatsApp Inbox: what arrives through Meta's webhook is saved here, and what
@@ -35,11 +37,17 @@ import tools.jackson.databind.JsonNode;
  *
  * <p><b>Saved templates</b> (Communication → Templates) are not Meta's: they go out as
  * normal messages, so only inside the window too (see {@link TemplateMessages}).
+ *
+ * <p><b>Files</b> are kept by OneBase too ({@link WhatsAppMediaStore}): Meta deletes its
+ * copies after a while.
  */
 @Service
 public class WhatsAppService {
 
 	private static final Logger log = LoggerFactory.getLogger(WhatsAppService.class);
+	private static final JsonMapper JSON = JsonMapper.builder().build();
+	private static final TypeReference<List<TemplateMessages.Button>> BUTTONS = new TypeReference<>() {
+	};
 	static final Duration WINDOW = Duration.ofHours(24);
 	static final int MAX_TEXT = 4096;
 	/** Between the pieces of a saved template, so the phone receives them in order. */
@@ -50,8 +58,13 @@ public class WhatsAppService {
 			String preview, boolean windowOpen, Instant windowEndsAt, Long clientId) {
 	}
 
+	/**
+	 * One message. {@code footer} (or null) and {@code buttons} ([] when none) come from saved
+	 * templates: the footer shown grey under the text, the buttons under the bubble.
+	 */
 	public record MessageView(long id, String direction, String type, String body, boolean hasMedia, String mediaMime,
-			String mediaFilename, String status, String error, Instant createdAt) {
+			String mediaFilename, String status, String error, Instant createdAt, String footer,
+			List<TemplateMessages.Button> buttons) {
 	}
 
 	public record StatusView(boolean connected, long unread) {
@@ -63,15 +76,18 @@ public class WhatsAppService {
 	private final WhatsAppSettings settings;
 	private final ClientService clients;
 	private final TemplateService templates;
+	private final WhatsAppMediaStore files;
 
 	public WhatsAppService(WhatsAppConversationRepository conversations, WhatsAppMessageRepository messages,
-			WhatsAppCloudApi api, WhatsAppSettings settings, ClientService clients, TemplateService templates) {
+			WhatsAppCloudApi api, WhatsAppSettings settings, ClientService clients, TemplateService templates,
+			WhatsAppMediaStore files) {
 		this.conversations = conversations;
 		this.messages = messages;
 		this.api = api;
 		this.settings = settings;
 		this.clients = clients;
 		this.templates = templates;
+		this.files = files;
 	}
 
 	// ── What Meta sends us ─────────────────────────────────────────────────────
@@ -249,6 +265,7 @@ public class WhatsAppService {
 		}
 		String text = caption == null || caption.isBlank() ? null : caption.strip();
 		WhatsAppMessage message = messages.save(WhatsAppMessage.outgoing(conversationId, type, text, null, mime, name, user.userId()));
+		files.keep(message.getId(), bytes, mime);
 		return deliver(conversation, message, () -> {
 			String mediaId = api.upload(bytes, mime, name);
 			message.uploaded(mediaId);
@@ -291,18 +308,21 @@ public class WhatsAppService {
 	}
 
 	private MessageView sendPiece(AuthPrincipal user, WhatsAppConversation conversation, TemplateMessages.Outgoing piece,
-			Map<Long, FileData> files) {
+			Map<Long, FileData> templateFiles) {
 		String to = conversation.getWaId();
 		long id = conversation.getId();
 		return switch (piece) {
 			case TemplateMessages.Text text -> {
-				WhatsAppMessage message = messages.save(WhatsAppMessage.outgoing(id, Type.TEXT, text.body(), null, null, null, user.userId()));
-				yield deliver(conversation, message, () -> api.sendText(to, text.body()));
+				WhatsAppMessage message = WhatsAppMessage.outgoing(id, Type.TEXT, text.body(), null, null, null, user.userId());
+				message.extras(text.footer(), null);
+				messages.save(message);
+				yield deliver(conversation, message, () -> api.sendText(to, text.sent()));
 			}
 			case TemplateMessages.Media media -> {
-				FileData file = files.get(media.fileId());
+				FileData file = templateFiles.get(media.fileId());
 				WhatsAppMessage message = messages.save(WhatsAppMessage.outgoing(id, Type.valueOf(media.type().name()),
 					media.caption(), null, file.mime(), file.filename(), user.userId()));
+				files.keep(message.getId(), file.bytes(), file.mime());
 				yield deliver(conversation, message, () -> {
 					String mediaId = api.upload(file.bytes(), file.mime(), file.filename());
 					message.uploaded(mediaId);
@@ -310,12 +330,22 @@ public class WhatsAppService {
 				});
 			}
 			case TemplateMessages.Interactive interactive -> {
-				// Kept as a text: the words, then a line "[Label]" per button.
-				WhatsAppMessage message = messages.save(WhatsAppMessage.outgoing(id, Type.TEXT, interactive.shown(), null,
-					null, null, user.userId()));
+				// Kept as what the client sees: the photo or PDF on top (downloadable like any file),
+				// the words, the footer and the buttons apart.
+				FileData header = interactive.header() == null ? null : templateFiles.get(interactive.header().fileId());
+				Type type = header == null ? Type.TEXT : Type.valueOf(interactive.header().type().name());
+				WhatsAppMessage message = WhatsAppMessage.outgoing(id, type, interactive.body(), null,
+					header == null ? null : header.mime(), header == null ? null : header.filename(), user.userId());
+				message.extras(interactive.footer().isEmpty() ? null : interactive.footer(),
+					JSON.writeValueAsString(interactive.buttons()));
+				messages.save(message);
+				if (header != null) files.keep(message.getId(), header.bytes(), header.mime());
 				yield deliver(conversation, message, () -> {
-					FileData header = interactive.header() == null ? null : files.get(interactive.header().fileId());
-					String headerId = header == null ? null : api.upload(header.bytes(), header.mime(), header.filename());
+					String headerId = null;
+					if (header != null) {
+						headerId = api.upload(header.bytes(), header.mime(), header.filename());
+						message.uploaded(headerId);
+					}
 					return api.sendInteractive(to, interactive.payload(headerId, header == null ? null : header.filename()));
 				});
 			}
@@ -335,10 +365,16 @@ public class WhatsAppService {
 		}
 	}
 
+	/**
+	 * A message's file: our own copy when we have it; otherwise fetched from Meta now and
+	 * kept. 404 with a sentence when Meta has deleted it meanwhile.
+	 */
 	public WhatsAppCloudApi.MediaFile media(long messageId) {
 		WhatsAppMessage message = messages.findById(messageId).orElseThrow(() -> ApiException.notFound("This message does not exist."));
-		if (message.getMediaId() == null) throw ApiException.notFound("This message has no file to download.");
-		return api.download(message.getMediaId());
+		return files.find(messageId).orElseGet(() -> {
+			if (message.getMediaId() == null) throw ApiException.notFound("This message has no file to download.");
+			return files.fetch(message);
+		});
 	}
 
 	public String fileName(long messageId) {
@@ -412,6 +448,17 @@ public class WhatsAppService {
 	private static MessageView view(WhatsAppMessage m) {
 		return new MessageView(m.getId(), m.getDirection().name(), m.getType().name(), m.getBody(),
 			m.getMediaId() != null,
-			m.getMediaMime(), m.getMediaFilename(), m.getStatus().name(), m.getError(), m.getCreatedAt());
+			m.getMediaMime(), m.getMediaFilename(), m.getStatus().name(), m.getError(), m.getCreatedAt(), m.getFooter(),
+			buttons(m.getButtons()));
+	}
+
+	private static List<TemplateMessages.Button> buttons(String json) {
+		if (json == null || json.isBlank()) return List.of();
+		try {
+			return JSON.readValue(json, BUTTONS);
+		} catch (RuntimeException e) {
+			log.warn("Unreadable buttons on a WhatsApp message: {}", e.getMessage());
+			return List.of();
+		}
 	}
 }

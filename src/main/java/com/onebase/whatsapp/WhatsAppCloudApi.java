@@ -32,7 +32,38 @@ public class WhatsAppCloudApi {
 	private static final Logger log = LoggerFactory.getLogger(WhatsAppCloudApi.class);
 	static final long MAX_MEDIA_BYTES = 16L * 1024 * 1024;
 
+	/** The largest received file we download (and keep): Meta takes documents up to 100 MB. */
+	static final long MAX_DOWNLOAD_BYTES = MAX_MEDIA_BYTES * 6;
+
 	public record MediaFile(byte[] bytes, String mime) {
+	}
+
+	/** Meta refused a call: its HTTP status and error code, with the sentence for the person. */
+	static class MetaException extends ApiException {
+		final int httpStatus;
+		final int code;
+		final int subcode;
+
+		MetaException(int httpStatus, int code, int subcode, String message) {
+			super(HttpStatus.BAD_GATEWAY, message);
+			this.httpStatus = httpStatus;
+			this.code = code;
+			this.subcode = subcode;
+		}
+	}
+
+	/** Meta has deleted the file (it keeps them for a limited time): nothing to retry. */
+	public static class MediaGoneException extends ApiException {
+		public MediaGoneException() {
+			super(HttpStatus.NOT_FOUND, "This file is no longer available: WhatsApp keeps files only for a limited time.");
+		}
+	}
+
+	/** A received file larger than {@link #MAX_DOWNLOAD_BYTES}: nothing to retry. */
+	public static class MediaTooLargeException extends ApiException {
+		public MediaTooLargeException() {
+			super(HttpStatus.BAD_REQUEST, "This file is too large to download here.");
+		}
 	}
 
 	private final WhatsAppSettings settings;
@@ -108,15 +139,27 @@ public class WhatsAppCloudApi {
 		return call(request).path("id").asString();
 	}
 
-	/** A received file: Meta gives a short-lived address, fetched with the same token. */
+	/**
+	 * A received file: Meta gives a short-lived address, fetched with the same token.
+	 * {@link MediaGoneException} when Meta no longer has it (it keeps files for a limited time).
+	 */
 	public MediaFile download(String mediaId) {
-		JsonNode info = call(authorized(URI.create(graph() + mediaId)).GET().build());
+		JsonNode info;
+		try {
+			info = call(authorized(URI.create(graph() + mediaId)).GET().build());
+		} catch (MetaException e) {
+			if (gone(e)) throw new MediaGoneException();
+			throw e;
+		}
 		String url = info.path("url").asString("");
-		if (url.isEmpty()) throw ApiException.notFound("WhatsApp no longer has this file.");
+		if (url.isEmpty()) throw new MediaGoneException();
 		try {
 			HttpResponse<byte[]> response = http.send(authorized(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofByteArray());
-			if (response.statusCode() != 200) throw ApiException.notFound("WhatsApp no longer has this file.");
-			if (response.body().length > MAX_MEDIA_BYTES * 6) throw ApiException.badRequest("This file is too large to download here.");
+			if (response.statusCode() == 404 || response.statusCode() == 410) throw new MediaGoneException();
+			if (response.statusCode() != 200) {
+				throw new ApiException(HttpStatus.BAD_GATEWAY, "WhatsApp did not answer. Please try again in a moment.");
+			}
+			if (response.body().length > MAX_DOWNLOAD_BYTES) throw new MediaTooLargeException();
 			return new MediaFile(response.body(), info.path("mime_type").asString("application/octet-stream"));
 		} catch (IOException e) {
 			throw new ApiException(HttpStatus.BAD_GATEWAY, "WhatsApp did not answer. Please try again in a moment.");
@@ -167,13 +210,19 @@ public class WhatsAppCloudApi {
 			JsonNode error = body.path("error");
 			int code = error.path("code").asInt(0);
 			log.warn("WhatsApp API {} answered {}: {}", request.uri().getPath(), response.statusCode(), response.body());
-			throw new ApiException(HttpStatus.BAD_GATEWAY, explain(code, error.path("message").asString("")));
+			throw new MetaException(response.statusCode(), code, error.path("error_subcode").asInt(0),
+				explain(code, error.path("message").asString("")));
 		} catch (IOException e) {
 			throw new ApiException(HttpStatus.BAD_GATEWAY, "WhatsApp did not answer. Please try again in a moment.");
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			throw new ApiException(HttpStatus.BAD_GATEWAY, "WhatsApp did not answer. Please try again in a moment.");
 		}
+	}
+
+	/** "Object with ID … does not exist" (code 100, subcode 33) or a plain 404: Meta has deleted the file. */
+	static boolean gone(MetaException e) {
+		return e.httpStatus == 404 || e.subcode == 33 || (e.code == 100 && e.getMessage().contains("does not exist"));
 	}
 
 	/** Meta's codes, in words the person can act on. */

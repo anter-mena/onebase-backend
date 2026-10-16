@@ -129,14 +129,17 @@ public class GmailMailbox {
 
 	// ── What the screen asks for ─────────────────────────────────────────────
 
-	/** Unread in Inbox and Spam, the number of drafts. */
-	Map<FolderKey, Integer> counts() {
+	/** How many messages of a folder match Gmail's search ("is:unread {label:EasyIPTV}"). */
+	int count(FolderKey key, String gmailQuery) {
 		return withStore(store -> {
-			Map<FolderKey, Integer> counts = new LinkedHashMap<>();
-			counts.put(FolderKey.INBOX, store.getFolder("INBOX").getUnreadMessageCount());
-			counts.put(FolderKey.DRAFTS, folder(store, FolderKey.DRAFTS).getMessageCount());
-			counts.put(FolderKey.JUNK, folder(store, FolderKey.JUNK).getUnreadMessageCount());
-			return counts;
+			Folder folder = folder(store, key);
+			folder.open(Folder.READ_ONLY);
+			try {
+				String query = combine(baseQuery(key), gmailQuery);
+				return query.isBlank() ? folder.getMessageCount() : folder.search(new GmailRawSearchTerm(query)).length;
+			} finally {
+				close(folder, false);
+			}
 		});
 	}
 

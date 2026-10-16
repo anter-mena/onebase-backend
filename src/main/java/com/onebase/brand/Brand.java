@@ -8,16 +8,15 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 /**
  * A brand (table {@code brands}). There is no delete: a brand is switched off,
  * so clients and payments keep pointing at it.
  *
- * <p>The logo is stored here, as the small PNG {@link LogoImages} made — never
- * as the file that was found or uploaded.
+ * <p>The logo is not stored (decided 2026-10-16): only its address on the
+ * brand's own website, which every screen and email loads it from.
  */
 @Entity
 @Table(name = "brands")
@@ -48,12 +47,9 @@ public class Brand {
 	@Column(name = "tiktok_url")
 	private String tiktokUrl;
 
-	@JdbcTypeCode(SqlTypes.VARBINARY)
-	@Column(name = "logo")
-	private byte[] logo;
-
-	@Column(name = "logo_updated_at")
-	private Instant logoUpdatedAt;
+	/** The logo's absolute http(s) address on the brand's site. Null = none (the initials show). */
+	@Column(name = "logo_url", length = 2000)
+	private String logoUrl;
 
 	/** The brand's Google Analytics 4 property number, for the SEO page. Null = none. */
 	@Column(name = "ga4_property_id")
@@ -95,9 +91,8 @@ public class Brand {
 		touch();
 	}
 
-	void setLogo(byte[] png) {
-		this.logo = png;
-		this.logoUpdatedAt = png == null ? null : Instant.now();
+	void setLogoUrl(String logoUrl) {
+		this.logoUrl = logoUrl;
 		touch();
 	}
 
@@ -126,17 +121,26 @@ public class Brand {
 		this.updatedAt = Instant.now();
 	}
 
-	/** Our own address for the logo (it changes when the logo does), or null when there is none. */
+	/** The logo's address on the brand's site, or null when there is none. */
 	public String logoUrl() {
-		return logo == null ? null : "/api/brands/" + id + "/logo?v=" + logoUpdatedAt.toEpochMilli();
+		return logoUrl;
+	}
+
+	/**
+	 * True when the address ends in .png, .jpg, .jpeg, .gif or .webp (any case, the
+	 * query string left out): a picture every mail app can show. ICO and SVG are not.
+	 */
+	public static boolean isPicture(String url) {
+		if (url == null) return false;
+		String path = url.replaceFirst("[?#].*$", "").toLowerCase(Locale.ROOT);
+		return path.endsWith(".png") || path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".gif")
+			|| path.endsWith(".webp");
 	}
 
 	public Long getId() { return id; }
 	public String getName() { return name; }
 	public String getDomain() { return domain; }
 	public String getWebsiteUrl() { return websiteUrl; }
-	public byte[] getLogo() { return logo; }
-	public Instant getLogoUpdatedAt() { return logoUpdatedAt; }
 	public String getGa4PropertyId() { return ga4PropertyId; }
 	public boolean isActive() { return active; }
 	public Instant getCreatedAt() { return createdAt; }

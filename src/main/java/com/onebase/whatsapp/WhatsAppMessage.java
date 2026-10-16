@@ -17,6 +17,9 @@ public class WhatsAppMessage {
 
 	public enum Direction { IN, OUT }
 
+	/** {@code media_fetch_attempts} once we stopped trying to fetch the received file (see V18). */
+	static final short MEDIA_GAVE_UP = 1000;
+
 	public enum Type { TEXT, IMAGE, DOCUMENT, AUDIO, VIDEO, STICKER, TEMPLATE, OTHER }
 
 	/** RECEIVED for incoming; SENDING, SENT, DELIVERED, READ (or FAILED) for outgoing. */
@@ -58,6 +61,21 @@ public class WhatsAppMessage {
 
 	private String error;
 
+	/** A saved template's footer, shown grey under the text; null otherwise. */
+	@Column(name = "footer")
+	private String footer;
+
+	/** A saved template's buttons, as JSON ({@code [{"type","label","value"}]}); null otherwise. */
+	@Column(name = "buttons", columnDefinition = "text")
+	private String buttons;
+
+	/** Fetching a received file into our copy: tries so far ({@link #MEDIA_GAVE_UP} = no more), and not before when. */
+	@Column(name = "media_fetch_attempts", nullable = false)
+	private short mediaFetchAttempts;
+
+	@Column(name = "media_fetch_next_at")
+	private Instant mediaFetchNextAt;
+
 	@Column(name = "sent_by")
 	private Long sentBy;
 
@@ -98,6 +116,18 @@ public class WhatsAppMessage {
 		return m;
 	}
 
+	/** What a saved template adds to the text: its footer and its buttons (JSON), each null when none. */
+	void extras(String footer, String buttonsJson) {
+		this.footer = footer;
+		this.buttons = buttonsJson;
+	}
+
+	/** A failed fetch of the received file: try again at {@code next}, or never ({@code next} null). */
+	void mediaFetchFailed(Instant next) {
+		mediaFetchAttempts = next == null ? MEDIA_GAVE_UP : (short) Math.min(mediaFetchAttempts + 1, MEDIA_GAVE_UP - 1);
+		mediaFetchNextAt = next;
+	}
+
 	/** Our own file, once Meta has it: kept so it can be downloaded from the conversation too. */
 	void uploaded(String mediaId) {
 		this.mediaId = mediaId;
@@ -134,6 +164,10 @@ public class WhatsAppMessage {
 	public String getMediaFilename() { return mediaFilename; }
 	public Status getStatus() { return status; }
 	public String getError() { return error; }
+	public String getFooter() { return footer; }
+	public String getButtons() { return buttons; }
+	public int getMediaFetchAttempts() { return mediaFetchAttempts; }
+	public Instant getMediaFetchNextAt() { return mediaFetchNextAt; }
 	public Long getSentBy() { return sentBy; }
 	public Instant getCreatedAt() { return createdAt; }
 }

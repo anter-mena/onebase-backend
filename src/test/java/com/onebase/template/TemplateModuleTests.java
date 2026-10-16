@@ -227,7 +227,38 @@ class TemplateModuleTests {
 			.andExpect(jsonPath("$.length()").value(1))
 			.andExpect(jsonPath("$[0].type").value("TEXT"))
 			.andExpect(jsonPath("$[0].status").value("SENT"))
-			.andExpect(jsonPath("$[0].body").value("Your plan ends soon.\n\nEasyIPTV\n[Renew now]"));
+			.andExpect(jsonPath("$[0].body").value("Your plan ends soon."))
+			.andExpect(jsonPath("$[0].footer").value("EasyIPTV"))
+			.andExpect(jsonPath("$[0].buttons.length()").value(1))
+			.andExpect(jsonPath("$[0].buttons[0].type").value("QUICK_REPLY"))
+			.andExpect(jsonPath("$[0].buttons[0].label").value("Renew now"))
+			.andExpect(jsonPath("$[0].buttons[0].value").isEmpty());
+
+		// A photo under the words, with a link: kept as a photo (downloadable), the link as its button.
+		long photo = upload(admin, "offer.png", PNG);
+		String withPhoto = save(admin, null, "Photo offer", "EN", "",
+			"[{\"type\":\"TEXT\",\"text\":\"See our offer\"},{\"type\":\"IMAGE\",\"fileId\":" + photo + "},"
+				+ "{\"type\":\"BUTTON\",\"buttonType\":\"URL\",\"label\":\"Open\",\"value\":\"https://x.test/o\"}]")
+			.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+		when(api.upload(any(), eq("image/png"), eq("offer.png"))).thenReturn("media-51");
+		when(api.sendInteractive(eq("212600000051"), anyMap())).thenReturn("wamid.TPL51B");
+		mvc.perform(post("/api/whatsapp/conversations/" + open + "/templates/" + JsonPath.read(withPhoto, "$.id"))
+				.header("Authorization", "Bearer " + commercial))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()").value(1))
+			.andExpect(jsonPath("$[0].type").value("IMAGE"))
+			.andExpect(jsonPath("$[0].hasMedia").value(true))
+			.andExpect(jsonPath("$[0].mediaMime").value("image/png"))
+			.andExpect(jsonPath("$[0].mediaFilename").value("offer.png"))
+			.andExpect(jsonPath("$[0].body").value("See our offer"))
+			.andExpect(jsonPath("$[0].footer").isEmpty())
+			.andExpect(jsonPath("$[0].buttons[0].type").value("URL"))
+			.andExpect(jsonPath("$[0].buttons[0].label").value("Open"))
+			.andExpect(jsonPath("$[0].buttons[0].value").value("https://x.test/o"));
+		// Older messages: no footer, no buttons.
+		mvc.perform(get("/api/whatsapp/conversations/" + open + "/messages").header("Authorization", "Bearer " + commercial))
+			.andExpect(jsonPath("$[0].footer").isEmpty())
+			.andExpect(jsonPath("$[0].buttons.length()").value(0));
 
 		long closed = conversation("212600000052", Instant.now().minusSeconds(25 * 3600));
 		mvc.perform(post("/api/whatsapp/conversations/" + closed + "/templates/" + id).header("Authorization", "Bearer " + commercial))

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -31,7 +32,6 @@ import jakarta.mail.util.ByteArrayDataSource;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 import org.junit.jupiter.api.Test;
 
@@ -123,14 +123,16 @@ class InboxUnitTests {
 	@Test
 	void aLabelMatchingABrandGivesItsLogoAndItsSupportAddress() {
 		Fixture f = new Fixture();
-		when(f.mailbox.counts()).thenReturn(Map.of(FolderKey.INBOX, 4, FolderKey.DRAFTS, 1, FolderKey.JUNK, 0));
+		// Only brand mail counts.
+		when(f.mailbox.count(FolderKey.INBOX, "is:unread {label:EasyIPTV}")).thenReturn(4);
+		when(f.mailbox.count(FolderKey.DRAFTS, "{label:EasyIPTV from:support@easyiptv.ca}")).thenReturn(1);
 
 		Overview overview = f.service.overview();
 
-		assertThat(overview.brands()).extracting(InboxDtos.BrandView::name).containsExactly("EasyIPTV", "Personal");
+		// "Personal" matches no brand: it counts nowhere.
+		assertThat(overview.brands()).extracting(InboxDtos.BrandView::name).containsExactly("EasyIPTV");
 		assertThat(overview.brands().get(0).sender()).isEqualTo("support@easyiptv.ca");
-		assertThat(overview.brands().get(0).logoUrl()).startsWith("/api/brands/7/logo?v=");
-		assertThat(overview.brands().get(1).sender()).isNull();
+		assertThat(overview.brands().get(0).logoUrl()).isEqualTo("https://easyiptv.ca/apple-touch-icon.png");
 		assertThat(overview.senders()).extracting(InboxDtos.SenderView::email)
 			.containsExactly("jamie.responde@gmail.com", "support@easyiptv.ca");
 		assertThat(overview.folders()).extracting(InboxDtos.FolderView::unread).containsExactly(4, 1, 0, 0, 0, 0);
@@ -160,13 +162,12 @@ class InboxUnitTests {
 		Fixture f = new Fixture();
 		Snapshot direct = new Snapshot(12, FolderKey.INBOX, "Jane", "jane@example.com",
 			List.of(new Addr("", "sales@easyiptv.ca")), List.of(new Addr("Bob", "bob@example.com")), List.of(), List.of(),
-			"Price?", Instant.parse("2026-10-05T13:24:00Z"), true, false, List.of(), false,
+			"Price?", Instant.parse("2026-10-05T13:24:00Z"), true, false, List.of("EasyIPTV"), false,
 			new MailContent.Parsed("How much?", List.of()), "<y@example.com>", null, null);
 		when(f.mailbox.get(FolderKey.INBOX, 12)).thenReturn(direct);
 
 		MailDetail detail = f.service.detail("inbox", "12", true);
 
-		// No label yet: the brand comes from the address it was sent to.
 		assertThat(detail.brand()).isEqualTo("EasyIPTV");
 		assertThat(detail.defaultFrom()).isEqualTo("support@easyiptv.ca");
 		assertThat(detail.replyRecipients()).containsExactly("jane@example.com");
@@ -195,9 +196,67 @@ class InboxUnitTests {
 		Fixture f = new Fixture();
 		f.service.list("inbox", "invoice", true, "Easy IPTV", 500);
 		// The Inbox asks for 50 more, to make up for our own answers it leaves out.
-		verify(f.mailbox).list(FolderKey.INBOX, "label:Easy-IPTV is:unread invoice", InboxService.MAX_LIMIT + 50);
+		verify(f.mailbox).list(FolderKey.INBOX, "{label:EasyIPTV} label:EasyIPTV is:unread invoice", InboxService.MAX_LIMIT + 50);
 		f.service.list("trash", null, false, null, 30);
-		verify(f.mailbox).list(FolderKey.TRASH, "", 30);
+		verify(f.mailbox).list(FolderKey.TRASH, "{label:EasyIPTV}", 30);
+		// A label that is no brand can't be a filter.
+		assertThatThrownBy(() -> f.service.list("inbox", null, false, "Personal", null))
+			.isInstanceOf(ApiException.class).hasMessage("Unknown brand: Personal");
+	}
+
+	// ── Only brand mail ───────────────────────────────────────────────────
+
+	@Test
+	void theBrandRestrictionIsAGmailOr() {
+		assertThat(InboxService.brandQuery(List.of("EasyIPTV", "IPTV Now"), List.of()))
+			.isEqualTo("{label:EasyIPTV label:IPTV-Now}");
+		assertThat(InboxService.brandQuery(List.of("EasyIPTV"), List.of("support@easyiptv.ca")))
+			.isEqualTo("{label:EasyIPTV from:support@easyiptv.ca}");
+		assertThat(InboxService.brandQuery(List.of(), List.of())).isNull();
+	}
+
+	@Test
+	void sentAndDraftsAlsoTakeMailFromABrandAddress() {
+		Fixture f = new Fixture();
+		f.service.list("drafts", null, false, null, 10);
+		verify(f.mailbox).list(FolderKey.DRAFTS, "{label:EasyIPTV from:support@easyiptv.ca}", 10);
+
+		Snapshot fromSupport = snapshot("support@easyiptv.ca", List.of(new Addr("", "jane@example.com")), "Hi", "Hi", List.of());
+		List<String> labels = List.of("EasyIPTV");
+		List<String> senders = List.of("support@easyiptv.ca");
+		assertThat(InboxService.belongs(fromSupport, FolderKey.SENT, labels, senders)).isTrue();
+		assertThat(InboxService.belongs(fromSupport, FolderKey.DRAFTS, labels, senders)).isTrue();
+		assertThat(InboxService.belongs(fromSupport, FolderKey.INBOX, labels, senders)).isFalse();
+		Snapshot labelled = snapshot("jane@example.com", List.of(), "Hi", "Hi", List.of("easyiptv"));
+		assertThat(InboxService.belongs(labelled, FolderKey.INBOX, labels, senders)).isTrue();
+		Snapshot other = snapshot("deals@shop.example", List.of(), "Sale!", "Sale!", List.of("Personal"));
+		assertThat(InboxService.belongs(other, FolderKey.ARCHIVE, labels, senders)).isFalse();
+	}
+
+	@Test
+	void anEmailThatIsNoBrandMailCannotBeOpened() {
+		Fixture f = new Fixture();
+		Snapshot promo = snapshot("deals@shop.example", List.of(new Addr("", "jamie.responde@gmail.com")), "Sale!", "Sale!",
+			List.of("Personal"));
+		when(f.mailbox.get(FolderKey.INBOX, 1)).thenReturn(promo);
+
+		assertThatThrownBy(() -> f.service.detail("inbox", "1", true))
+			.isInstanceOf(ApiException.class).hasMessage("This email is not in this inbox.");
+		assertThatThrownBy(() -> f.service.attachment("inbox", "1", 0)).hasMessage("This email is not in this inbox.");
+		assertThatThrownBy(() -> f.service.apply("inbox", "1", "archive")).hasMessage("This email is not in this inbox.");
+		verify(f.mailbox, never()).apply(anyFolder(), anyLong(), org.mockito.ArgumentMatchers.any());
+		verify(f.mailbox, never()).attachment(anyFolder(), anyLong(), anyInt(), anyLong());
+	}
+
+	@Test
+	void withNoBrandLabelTheInboxIsEmpty() {
+		Fixture f = new Fixture();
+		when(f.mailbox.userLabels()).thenReturn(List.of("Personal"));
+
+		assertThat(f.service.list("inbox", null, false, null, null)).isEmpty();
+		assertThat(f.service.overview().folders()).extracting(InboxDtos.FolderView::unread).containsOnly(0);
+		verify(f.mailbox, never()).list(anyFolder(), anyString(), anyInt());
+		verify(f.mailbox, never()).count(anyFolder(), anyString());
 	}
 
 	@Test
@@ -215,13 +274,14 @@ class InboxUnitTests {
 			List.of(new Addr("", "support@easyiptv.ca")), List.of(), List.of(), List.of(),
 			"Re: Re: [EasyIPTV] New message", Instant.parse("2026-10-05T13:40:00Z"), false, false, List.of("EasyIPTV"), false,
 			new MailContent.Parsed("Great", List.of()), "<c@example.com>", null, null);
-		when(f.mailbox.list(eq(FolderKey.INBOX), eq(""), anyInt())).thenReturn(List.of(client, ourReply, form));
+		when(f.mailbox.list(eq(FolderKey.INBOX), eq("{label:EasyIPTV}"), anyInt())).thenReturn(List.of(client, ourReply, form));
 
 		assertThat(f.service.list("inbox", null, false, null, null)).extracting(InboxDtos.MailSummary::id)
 			.containsExactly("23", "21");
 
 		// Sent: only what went to someone else — not the website form email.
-		when(f.mailbox.list(eq(FolderKey.SENT), eq(""), anyInt())).thenReturn(List.of(ourReply, form));
+		when(f.mailbox.list(eq(FolderKey.SENT), eq("{label:EasyIPTV from:support@easyiptv.ca}"), anyInt()))
+			.thenReturn(List.of(ourReply, form));
 		assertThat(f.service.list("sent", null, false, null, null)).extracting(InboxDtos.MailSummary::id)
 			.containsExactly("22");
 	}
@@ -249,14 +309,35 @@ class InboxUnitTests {
 	@Test
 	void anEmailFromABrandUsesTheBrandDesign() {
 		String html = MailComposer.branded(MailComposer.toHtml("Hello <Jane>"),
-			new MailComposer.Branding("Easy IPTV", "easyiptv.ca", "https://app.test/api/brands/7/logo?v=1"));
+			new MailComposer.Branding("Easy IPTV", "easyiptv.ca", "https://easyiptv.ca/apple-touch-icon.png"));
 		assertThat(html)
-			.contains("<img src=\"https://app.test/api/brands/7/logo?v=1\"")
+			.contains("<img src=\"https://easyiptv.ca/apple-touch-icon.png\"")
 			.contains("Hello &lt;Jane&gt;")
 			.contains("Easy IPTV &middot; <a href=\"https://easyiptv.ca\"");
 		// No logo yet: the brand name in a black badge instead.
 		assertThat(MailComposer.branded("x", new MailComposer.Branding("IPTV NOW", "iptvnow.ca", null)))
 			.contains(">IPTV NOW</td>").doesNotContain("<img");
+	}
+
+	@Test
+	void anEmailUsesTheLogoFromTheBrandSiteOnlyWhenMailAppsCanShowIt() {
+		assertThat(InboxService.emailLogo(brandWithLogo("https://easyiptv.ca/apple-touch-icon.png")))
+			.isEqualTo("https://easyiptv.ca/apple-touch-icon.png");
+		assertThat(InboxService.emailLogo(brandWithLogo("https://cdn.easyiptv.ca/Logo.JPEG?v=3#top")))
+			.isEqualTo("https://cdn.easyiptv.ca/Logo.JPEG?v=3#top");
+		assertThat(InboxService.emailLogo(brandWithLogo("https://easyiptv.ca/logo.webp"))).isNotNull();
+		// ICO and SVG: mail apps can't show them, so the brand name is set in text instead.
+		assertThat(InboxService.emailLogo(brandWithLogo("https://easyiptv.ca/favicon.ico"))).isNull();
+		assertThat(InboxService.emailLogo(brandWithLogo("https://easyiptv.ca/logo.svg?x=.png"))).isNull();
+		assertThat(InboxService.emailLogo(brandWithLogo("https://easyiptv.ca/icon"))).isNull();
+		assertThat(InboxService.emailLogo(brandWithLogo(null))).isNull();
+		assertThat(InboxService.emailLogo(null)).isNull();
+	}
+
+	private static Brand brandWithLogo(String logoUrl) {
+		Brand brand = mock(Brand.class);
+		when(brand.logoUrl()).thenReturn(logoUrl);
+		return brand;
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────
@@ -271,13 +352,12 @@ class InboxUnitTests {
 			when(easy.getId()).thenReturn(7L);
 			when(easy.getName()).thenReturn("Easy IPTV");
 			when(easy.getDomain()).thenReturn("easyiptv.ca");
-			when(easy.getLogo()).thenReturn(new byte[] {1});
-			when(easy.getLogoUpdatedAt()).thenReturn(Instant.parse("2026-10-01T00:00:00Z"));
+			when(easy.logoUrl()).thenReturn("https://easyiptv.ca/apple-touch-icon.png");
 			when(brands.findAllByOrderByCreatedAtAscIdAsc()).thenReturn(List.of(easy));
 			when(mailbox.userLabels()).thenReturn(List.of("EasyIPTV", "Personal"));
 			InboxSettings settings = new InboxSettings("jamie.responde@gmail.com", "abcd efgh", "Jamie Responder",
 				"imap.gmail.com", 993, "smtp.gmail.com", 465, "support");
-			service = new InboxService(mailbox, settings, brands, "https://app.test/");
+			service = new InboxService(mailbox, settings, brands);
 		}
 	}
 

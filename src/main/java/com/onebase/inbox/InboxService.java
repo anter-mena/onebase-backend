@@ -30,7 +30,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -48,7 +47,11 @@ import org.springframework.web.multipart.MultipartFile;
  * <p><b>Brands come from Gmail labels.</b> A label whose name matches a brand in
  * Configuration → Brands (letters and digits only, any case: "EasyIPTV" = "Easy IPTV",
  * or the domain without ".ca") gets that brand's logo, and answers go out from
- * {@code support@<brand domain>}. A label with no brand still filters, with no logo.
+ * {@code support@<brand domain>}.
+ *
+ * <p><b>Only brand mail</b> (decided 2026-10-16): the Inbox shows the emails that carry a
+ * brand label — in Sent and Drafts also those from a brand address — and nothing else
+ * of the Gmail account. A label with no brand counts nowhere.
  *
  * <p>Only the addresses in {@link #senders} can be used as From — the mailbox's own
  * and each brand's support@, which must be set up in Gmail "Send mail as".
@@ -67,46 +70,57 @@ public class InboxService {
 	private final GmailMailbox mailbox;
 	private final InboxSettings settings;
 	private final BrandRepository brands;
-	private final String frontendUrl;
 	private volatile JavaMailSenderImpl smtp;
 
-	public InboxService(GmailMailbox mailbox, InboxSettings settings, BrandRepository brands,
-			@org.springframework.beans.factory.annotation.Value("${onebase.frontend-url}") String frontendUrl) {
+	public InboxService(GmailMailbox mailbox, InboxSettings settings, BrandRepository brands) {
 		this.mailbox = mailbox;
 		this.settings = settings;
 		this.brands = brands;
-		// Brand logos are served (publicly) through the frontend's https address, so mail apps load them.
-		this.frontendUrl = frontendUrl.replaceAll("/+$", "");
 	}
 
 	// ── Reading ───────────────────────────────────────────────────────────────
 
 	public Overview overview() {
-		Map<FolderKey, Integer> counts = mailbox.counts();
+		List<BrandMatch> matches = brandMatches();
+		// Only brand mail counts (decided 2026-10-16), like only brand mail is listed.
+		String inbox = brandQuery(FolderKey.INBOX, matches);
+		String drafts = brandQuery(FolderKey.DRAFTS, matches);
+		String junk = brandQuery(FolderKey.JUNK, matches);
 		List<FolderView> folders = List.of(
-			new FolderView("inbox", "Inbox", "inbox", counts.getOrDefault(FolderKey.INBOX, 0), "working"),
-			new FolderView("drafts", "Drafts", "file", counts.getOrDefault(FolderKey.DRAFTS, 0), "working"),
+			new FolderView("inbox", "Inbox", "inbox", inbox == null ? 0 : mailbox.count(FolderKey.INBOX, "is:unread " + inbox), "working"),
+			new FolderView("drafts", "Drafts", "file", drafts == null ? 0 : mailbox.count(FolderKey.DRAFTS, drafts), "working"),
 			new FolderView("sent", "Sent", "send", 0, "working"),
 			new FolderView("archive", "Archive", "archive", 0, "aside"),
-			new FolderView("junk", "Spam", "archive-x", counts.getOrDefault(FolderKey.JUNK, 0), "aside"),
+			new FolderView("junk", "Spam", "archive-x", junk == null ? 0 : mailbox.count(FolderKey.JUNK, "is:unread " + junk), "aside"),
 			new FolderView("trash", "Trash", "trash", 0, "aside"));
-		List<BrandMatch> matches = brandMatches();
 		List<BrandView> brandViews = matches.stream()
-			.map(m -> new BrandView(m.label(), logoUrl(m.brand()), m.sender() == null ? null : m.sender().email()))
+			.map(m -> new BrandView(m.label(), m.brand().logoUrl(), m.sender() == null ? null : m.sender().email()))
 			.toList();
 		return new Overview(new AccountView(settings.username(), settings.displayName()), folders, brandViews, senders(matches));
 	}
 
 	public List<MailSummary> list(String folder, String q, boolean unread, String brand, Integer limit) {
 		FolderKey key = FolderKey.of(folder);
+		List<BrandMatch> matches = brandMatches();
+		// Only brand mail (decided 2026-10-16): no brand label, nothing to show.
+		String restriction = brandQuery(key, matches);
+		if (restriction == null) return List.of();
 		List<String> parts = new ArrayList<>();
-		if (brand != null && !brand.isBlank()) parts.add("label:" + labelQuery(brand));
+		parts.add(restriction);
+		if (brand != null && !brand.isBlank()) {
+			BrandMatch chosen = matches.stream()
+				.filter(m -> m.label().equalsIgnoreCase(brand.trim()) || normalize(m.label()).equals(normalize(brand)))
+				.findFirst()
+				.orElseThrow(() -> ApiException.badRequest("Unknown brand: " + brand.trim()));
+			parts.add("label:" + labelQuery(chosen.label()));
+		}
 		if (unread) parts.add("is:unread");
 		if (q != null && !q.isBlank()) parts.add(q.trim());
 		int size = limit == null ? DEFAULT_LIMIT : Math.max(1, Math.min(MAX_LIMIT, limit));
-		List<BrandMatch> matches = brandMatches();
+		// What Gmail found is checked again here, so no search words can widen the restriction.
+		java.util.function.Predicate<Snapshot> isBrandMail = s -> belongs(s, key, labels(matches), brandSenders(matches));
 		if (key != FolderKey.INBOX && key != FolderKey.SENT) {
-			return mailbox.list(key, String.join(" ", parts), size).stream().map(s -> summary(s, matches)).toList();
+			return mailbox.list(key, String.join(" ", parts), size).stream().filter(isBrandMail).map(s -> summary(s, matches)).toList();
 		}
 		// Inbox = what we received, Sent = what we sent to someone else. Gmail mixes the two:
 		// our reply joins the Inbox conversation, and a website form email (sent by this account,
@@ -116,6 +130,7 @@ public class InboxService {
 		java.util.function.Predicate<Snapshot> received = s ->
 			!s.sentByUs() || concat(s.to(), s.cc()).stream().anyMatch(a -> ours.contains(a.email()) || isOwnDomainAlias(a.email(), matches));
 		return mailbox.list(key, String.join(" ", parts), Math.min(MAX_LIMIT + 50, size + 50)).stream()
+			.filter(isBrandMail)
 			.filter(s -> key == FolderKey.INBOX ? received.test(s) : !received.test(s))
 			.limit(size)
 			.map(s -> summary(s, matches))
@@ -125,13 +140,13 @@ public class InboxService {
 	public MailDetail detail(String folder, String id, boolean markRead) {
 		FolderKey key = FolderKey.of(folder);
 		long msgId = parseId(id);
-		Snapshot s = mailbox.get(key, msgId);
+		List<BrandMatch> matches = brandMatches();
+		Snapshot s = brandMail(key, msgId, matches);
 		boolean read = s.read();
 		if (markRead && !read && key != FolderKey.DRAFTS) {
 			mailbox.apply(key, msgId, Action.READ);
 			read = true;
 		}
-		List<BrandMatch> matches = brandMatches();
 		List<SenderView> senders = senders(matches);
 		Set<String> ours = new LinkedHashSet<>();
 		senders.forEach(sender -> ours.add(sender.email().toLowerCase(Locale.ROOT)));
@@ -167,7 +182,10 @@ public class InboxService {
 	}
 
 	public GmailMailbox.FileData attachment(String folder, String id, int index) {
-		return mailbox.attachment(FolderKey.of(folder), parseId(id), index, MAX_FILES_BYTES + 1);
+		FolderKey key = FolderKey.of(folder);
+		long msgId = parseId(id);
+		brandMail(key, msgId, brandMatches());
+		return mailbox.attachment(key, msgId, index, MAX_FILES_BYTES + 1);
 	}
 
 	public void apply(String folder, String id, String action) {
@@ -177,7 +195,10 @@ public class InboxService {
 		} catch (IllegalArgumentException e) {
 			throw ApiException.badRequest("Unknown action: " + action);
 		}
-		mailbox.apply(FolderKey.of(folder), parseId(id), parsed);
+		FolderKey key = FolderKey.of(folder);
+		long msgId = parseId(id);
+		brandMail(key, msgId, brandMatches());
+		mailbox.apply(key, msgId, parsed);
 	}
 
 	// ── Writing ───────────────────────────────────────────────────────────────
@@ -243,14 +264,14 @@ public class InboxService {
 
 		Snapshot replyTo = null;
 		if (request.replyToId() != null && !request.replyToId().isBlank()) {
-			replyTo = mailbox.get(FolderKey.of(request.replyToFolder()), parseId(request.replyToId()));
+			replyTo = brandMail(FolderKey.of(request.replyToFolder()), parseId(request.replyToId()), matches);
 			inReplyTo = replyTo.messageIdHeader();
 			references = MailComposer.references(replyTo);
 			body = MailComposer.withQuote(body, replyTo);
 		}
 		Snapshot forward = null;
 		if (request.forwardId() != null && !request.forwardId().isBlank()) {
-			forward = mailbox.get(FolderKey.of(request.forwardFolder()), parseId(request.forwardId()));
+			forward = brandMail(FolderKey.of(request.forwardFolder()), parseId(request.forwardId()), matches);
 			body = MailComposer.withForward(body, forward);
 		}
 		Snapshot draft = draftId == null ? null : mailbox.get(FolderKey.DRAFTS, draftId);
@@ -318,19 +339,70 @@ public class InboxService {
 					break;
 				}
 			}
-			SenderView sender = match == null || match.getDomain() == null || match.getDomain().isBlank() ? null
+			// A label with no brand is not ours to show (decided 2026-10-16).
+			if (match == null) continue;
+			SenderView sender = match.getDomain() == null || match.getDomain().isBlank() ? null
 				: new SenderView(label + " Support", settings.senderLocalPart() + "@" + match.getDomain().toLowerCase(Locale.ROOT));
 			result.add(new BrandMatch(label, match, sender));
 		}
 		return result;
 	}
 
+	// ── Only brand mail (decided 2026-10-16) ───────────────────────────────────
+
+	/** The brand labels' names. */
+	private static List<String> labels(List<BrandMatch> matches) {
+		return matches.stream().map(BrandMatch::label).toList();
+	}
+
+	/** The brands' own addresses (support@…), without the mailbox's: what Sent and Drafts also take. */
+	private static List<String> brandSenders(List<BrandMatch> matches) {
+		return matches.stream().filter(m -> m.sender() != null).map(m -> m.sender().email()).distinct().toList();
+	}
+
+	private static boolean fromBrandCounts(FolderKey key) {
+		return key == FolderKey.SENT || key == FolderKey.DRAFTS;
+	}
+
+	/** This folder's restriction to brand mail, or null when there is no brand label at all. */
+	private static String brandQuery(FolderKey key, List<BrandMatch> matches) {
+		return brandQuery(labels(matches), fromBrandCounts(key) ? brandSenders(matches) : List.of());
+	}
+
+	/**
+	 * Gmail's OR (braces) of the brand labels, and of mail from the brand addresses:
+	 * {@code {label:EasyIPTV label:IPTV-Now from:support@easyiptv.ca}}. Null when empty.
+	 */
+	static String brandQuery(List<String> labels, List<String> fromAddresses) {
+		List<String> terms = new ArrayList<>();
+		labels.forEach(label -> terms.add("label:" + labelQuery(label)));
+		fromAddresses.forEach(address -> terms.add("from:" + address.trim().replace("\"", "")));
+		return terms.isEmpty() ? null : "{" + String.join(" ", terms) + "}";
+	}
+
+	/** Brand mail: it has a brand label — or, in Sent and Drafts, it is from a brand address. */
+	static boolean belongs(Snapshot s, FolderKey key, List<String> labels, List<String> fromAddresses) {
+		for (String label : s.labels()) {
+			if (labels.stream().anyMatch(label::equalsIgnoreCase)) return true;
+		}
+		return fromBrandCounts(key) && s.fromEmail() != null
+			&& fromAddresses.stream().anyMatch(a -> a.equalsIgnoreCase(s.fromEmail().trim()));
+	}
+
+	/** An email, refused (404) unless it is brand mail: a link to any other can't open it. */
+	private Snapshot brandMail(FolderKey key, long id, List<BrandMatch> matches) {
+		Snapshot s = mailbox.get(key, id);
+		if (!belongs(s, key, labels(matches), brandSenders(matches))) {
+			throw ApiException.notFound("This email is not in this inbox.");
+		}
+		return s;
+	}
+
 	/** The design of an email from this address: its brand, or the mailbox's own name. */
 	private MailComposer.Branding branding(SenderView from, List<BrandMatch> matches) {
 		for (BrandMatch m : matches) {
 			if (m.sender() != null && m.brand() != null && m.sender().email().equalsIgnoreCase(from.email())) {
-				String logo = logoUrl(m.brand());
-				return new MailComposer.Branding(m.brand().getName(), m.brand().getDomain(), logo == null ? null : frontendUrl + logo);
+				return new MailComposer.Branding(m.brand().getName(), m.brand().getDomain(), emailLogo(m.brand()));
 			}
 		}
 		return new MailComposer.Branding(settings.displayName(), null, null);
@@ -399,9 +471,13 @@ public class InboxService {
 			s.content().attachments().size());
 	}
 
-	private static String logoUrl(Brand brand) {
-		if (brand == null || brand.getLogo() == null || brand.getLogoUpdatedAt() == null) return null;
-		return "/api/brands/" + brand.getId() + "/logo?v=" + brand.getLogoUpdatedAt().toEpochMilli();
+	/**
+	 * The logo for the top of an email: its address on the brand's site, as it is,
+	 * when it is a PNG, JPEG, GIF or WebP. Mail apps can't show ICO or SVG, so then
+	 * there is none and the composer sets the brand's name in text instead.
+	 */
+	static String emailLogo(Brand brand) {
+		return brand != null && Brand.isPicture(brand.logoUrl()) ? brand.logoUrl() : null;
 	}
 
 	/** Gmail's label search: spaces become dashes. */

@@ -1,6 +1,8 @@
 package com.onebase.credit;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -14,4 +16,7 @@ public interface CreditTopupRepository extends JpaRepository<CreditTopup, Long> 
 	BigDecimal totalAmount();
 
 	Optional<CreditTopup> findFirstByOrderByCreatedAtDescIdDesc();
+
+	/** Top-ups paid between two moments, newest first: money out for the Dashboard and the Ledger. */
+	List<CreditTopup> findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(Instant from, Instant to);
 }

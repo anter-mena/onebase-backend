@@ -52,8 +52,21 @@ public final class PaymentDtos {
 	public record LedgerRow(PaymentResponse payment, long clientId, String clientName) {
 	}
 
-	/** The Ledger for a period, newest first; `methodId` when filtered to one account. */
-	public record Ledger(String range, LocalDate start, LocalDate end, Long methodId, List<LedgerRow> rows) {
+	/** A panel-credit top-up: money out on the day it was paid. */
+	public record TopupRow(long id, int credits, BigDecimal amount, String note, Instant createdAt, String createdByName) {
+	}
+
+	/**
+	 * The Ledger for a period, newest first; `methodId` when filtered to one account.
+	 * A cash view (decided 2026-10-16).
+	 *
+	 * @param topups   the period's top-ups, newest first; empty when filtered to an account (a top-up is paid from none)
+	 * @param moneyIn  what the rows' payments brought in
+	 * @param moneyOut the top-ups listed + the perks cost of the rows' payments
+	 * @param net      moneyIn − moneyOut
+	 */
+	public record Ledger(String range, LocalDate start, LocalDate end, Long methodId, List<LedgerRow> rows,
+			List<TopupRow> topups, BigDecimal moneyIn, BigDecimal moneyOut, BigDecimal net) {
 	}
 
 	/** A payment just added, and a warning when it took the panel credit below zero. */

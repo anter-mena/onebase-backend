@@ -11,14 +11,14 @@ import com.onebase.common.ApiException;
 import com.onebase.security.AuthPrincipal;
 import com.onebase.user.User;
 import com.onebase.user.UserRepository;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -40,7 +40,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class BrandService {
 
 	private static final Logger log = LoggerFactory.getLogger(BrandService.class);
-	private static final String NOT_A_PICTURE = "This file is not a picture we can use. Use a PNG, JPEG, GIF or ICO file.";
+	private static final String NOT_A_LOGO_URL = "The logo address must be a full web address, like https://nike.com/logo.png.";
 
 	private final BrandRepository brands;
 	private final BrandLookup lookup;
@@ -66,11 +66,6 @@ public class BrandService {
 			.toList();
 	}
 
-	@Transactional(readOnly = true)
-	public Optional<byte[]> logo(long id) {
-		return brands.findById(id).map(Brand::getLogo);
-	}
-
 	/** Reads the site. Saves nothing: the Admin checks the result first. */
 	@Transactional(readOnly = true)
 	public LookupResponse lookUp(String url) {
@@ -82,9 +77,7 @@ public class BrandService {
 		} catch (UrlGuard.BlockedUrlException e) {
 			throw ApiException.badRequest(e.getMessage());
 		}
-		String logo = found.logoPng() == null ? null
-			: "data:image/png;base64," + Base64.getEncoder().encodeToString(found.logoPng());
-		return new LookupResponse(found.name(), website.domain(), website.url(), found.socials(), logo, existing,
+		return new LookupResponse(found.name(), website.domain(), website.url(), found.socials(), found.logoUrl(), existing,
 			found.warning());
 	}
 
@@ -94,7 +87,7 @@ public class BrandService {
 		refuseTaken(website.domain(), null);
 		Brand brand = new Brand(request.name(), website.domain(), website.url());
 		brand.setSocials(BrandLinks.socials(request.socials()));
-		if (request.logo() != null && !request.logo().isBlank()) brand.setLogo(storedLogo(request.logo()));
+		brand.setLogoUrl(logoUrl(request.logoUrl()));
 		if (request.ga4PropertyId() != null) brand.setGa4PropertyId(ga4Property(request.ga4PropertyId()));
 		brand = saveRefusingDuplicates(brand);
 
@@ -130,14 +123,9 @@ public class BrandService {
 		brand.setName(request.name());
 		brand.setWebsite(website.domain(), website.url());
 		brand.setSocials(socials);
-		if (Boolean.TRUE.equals(request.removeLogo())) {
-			if (brand.getLogo() != null) changed.add("logo removed");
-			brand.setLogo(null);
-		} else if (request.logo() != null && !request.logo().isBlank()) {
-			byte[] png = storedLogo(request.logo());
-			if (!Arrays.equals(png, brand.getLogo())) changed.add("logo");
-			brand.setLogo(png);
-		}
+		String logoUrl = logoUrl(request.logoUrl());
+		if (!Objects.equals(logoUrl, brand.logoUrl())) changed.add(logoUrl == null ? "logo removed" : "logo");
+		brand.setLogoUrl(logoUrl);
 		saveRefusingDuplicates(brand);
 
 		if (!changed.isEmpty()) {
@@ -191,19 +179,24 @@ public class BrandService {
 		}
 	}
 
-	/** A {@code data:} address from the form, made into the logo we store — or 400 when it is not a picture. */
-	private static byte[] storedLogo(String dataUrl) {
-		int comma = dataUrl.indexOf(',');
-		if (!dataUrl.startsWith("data:") || comma < 0 || !dataUrl.substring(0, comma).contains(";base64")) {
-			throw ApiException.badRequest(NOT_A_PICTURE);
-		}
-		byte[] bytes;
+	/**
+	 * The logo's address as the form sent it: null for none, otherwise a full http(s)
+	 * address — or 400. It is only kept, never opened by the server: browsers and
+	 * mail apps load it from the brand's site.
+	 */
+	private static String logoUrl(String value) {
+		if (value == null) return null;
+		URI uri;
 		try {
-			bytes = Base64.getDecoder().decode(dataUrl.substring(comma + 1).trim());
-		} catch (IllegalArgumentException e) {
-			throw ApiException.badRequest(NOT_A_PICTURE);
+			uri = new URI(value);
+		} catch (URISyntaxException e) {
+			throw ApiException.badRequest(NOT_A_LOGO_URL);
 		}
-		return LogoImages.toStoredPng(bytes).orElseThrow(() -> ApiException.badRequest(NOT_A_PICTURE));
+		String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+		if (!scheme.equals("http") && !scheme.equals("https") || uri.getHost() == null || uri.getRawUserInfo() != null) {
+			throw ApiException.badRequest(NOT_A_LOGO_URL);
+		}
+		return value;
 	}
 
 	private User actor(AuthPrincipal principal) {

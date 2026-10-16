@@ -97,8 +97,6 @@ public class SecurityConfig {
 					"/api/invitations/accept").permitAll()
 				// Meta's webhook: no account, so it proves itself with a signature (see WhatsAppWebhookController).
 				.requestMatchers("/api/whatsapp/webhook").permitAll()
-				// A brand's logo is no secret, and the browser loads it as a plain image (no token to send).
-				.requestMatchers(HttpMethod.GET, "/api/brands/*/logo").permitAll()
 				// Reading the brand list: both roles (Commercials pick a brand for clients and payments).
 				// Adding, editing and switching brands fall through to Admin-only below.
 				.requestMatchers(HttpMethod.GET, "/api/brands").authenticated()

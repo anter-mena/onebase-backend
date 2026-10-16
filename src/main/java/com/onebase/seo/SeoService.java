@@ -324,8 +324,6 @@ public class SeoService {
 	}
 
 	private static SeoBrand view(Brand b) {
-		String logo = b.getLogo() == null || b.getLogoUpdatedAt() == null ? null
-			: "/api/brands/" + b.getId() + "/logo?v=" + b.getLogoUpdatedAt().toEpochMilli();
-		return new SeoBrand(b.getId(), b.getName(), logo, b.getGa4PropertyId());
+		return new SeoBrand(b.getId(), b.getName(), b.logoUrl(), b.getGa4PropertyId());
 	}
 }

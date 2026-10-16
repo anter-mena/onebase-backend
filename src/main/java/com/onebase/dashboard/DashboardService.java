@@ -12,6 +12,8 @@ import com.onebase.client.ClientService;
 import com.onebase.common.ApiException;
 import com.onebase.credit.CreditService;
 import com.onebase.credit.CreditService.CreditSummary;
+import com.onebase.credit.CreditTopup;
+import com.onebase.credit.CreditTopupRepository;
 import com.onebase.payment.Payment;
 import com.onebase.payment.PaymentRepository;
 import com.onebase.paymentmethod.PaymentMethod;
@@ -55,12 +57,18 @@ public class DashboardService {
 	}
 
 	/**
-	 * The period's figures and the previous period's, for the change cues.
+	 * The period's figures and the previous period's, for the change cues. A cash view
+	 * (decided 2026-10-16): money out is what was paid in the period — panel-credit
+	 * top-ups on the day they were bought, and the perks of the period's payments.
 	 *
-	 * @param uncosted payments whose plan had no cost on file (counted as $0 cost)
+	 * @param topups   panel-credit top-ups paid in the period
+	 * @param perks    the perks cost of the period's payments
+	 * @param expenses topups + perks (a plan's cost is no longer counted: its credit was paid by a top-up)
+	 * @param uncosted always 0 since 2026-10-16; kept for older screens
 	 */
-	public record Totals(BigDecimal revenue, BigDecimal newRevenue, BigDecimal renewals, BigDecimal expenses, BigDecimal net,
-			long payments, long uncosted, BigDecimal previousRevenue, BigDecimal previousExpenses) {
+	public record Totals(BigDecimal revenue, BigDecimal newRevenue, BigDecimal renewals, BigDecimal expenses, BigDecimal topups,
+			BigDecimal perks, BigDecimal net, long payments, long uncosted, BigDecimal previousRevenue,
+			BigDecimal previousExpenses) {
 	}
 
 	public record BrandShare(long id, String name, String logoUrl, BigDecimal revenue, long clients) {
@@ -90,6 +98,7 @@ public class DashboardService {
 	private final BrandRepository brands;
 	private final PaymentMethodRepository methods;
 	private final CreditService credit;
+	private final CreditTopupRepository topups;
 	private final MonthlyTargetRepository targets;
 	private final UserRepository users;
 	private final ActionLogService actionLog;
@@ -97,13 +106,15 @@ public class DashboardService {
 
 	public DashboardService(PaymentRepository payments, ClientRepository clients, ClientService clientService,
 			BrandRepository brands, PaymentMethodRepository methods, CreditService credit, MonthlyTargetRepository targets,
-			UserRepository users, ActionLogService actionLog, @Value("${onebase.timezone:America/Toronto}") String zone) {
+			UserRepository users, ActionLogService actionLog, CreditTopupRepository topups,
+			@Value("${onebase.timezone:America/Toronto}") String zone) {
 		this.payments = payments;
 		this.clients = clients;
 		this.clientService = clientService;
 		this.brands = brands;
 		this.methods = methods;
 		this.credit = credit;
+		this.topups = topups;
 		this.targets = targets;
 		this.users = users;
 		this.actionLog = actionLog;
@@ -120,10 +131,15 @@ public class DashboardService {
 
 		BigDecimal newRevenue = sum(now.stream().filter(p -> p.getKind() == Payment.Kind.NEW_PLAN).map(Payment::getAmount).toList());
 		BigDecimal renewals = sum(now.stream().filter(p -> p.getKind() == Payment.Kind.RENEWAL).map(Payment::getAmount).toList());
-		BigDecimal expenses = sum(now.stream().map(DashboardService::cost).toList());
-		Totals totals = new Totals(newRevenue.add(renewals), newRevenue, renewals, expenses, newRevenue.add(renewals).subtract(expenses),
-			now.size(), now.stream().filter(p -> p.expense() == null).count(),
-			sum(before.stream().map(Payment::getAmount).toList()), sum(before.stream().map(DashboardService::cost).toList()));
+		List<CreditTopup> topupsNow = topups(period.start(), period.end());
+		BigDecimal topupsPaid = sum(topupsNow.stream().map(CreditTopup::getAmount).toList());
+		BigDecimal perks = sum(now.stream().map(Payment::getPerksCost).toList());
+		BigDecimal expenses = topupsPaid.add(perks);
+		BigDecimal previousExpenses = sum(topups(period.previousStart(), period.previousEnd()).stream().map(CreditTopup::getAmount).toList())
+			.add(sum(before.stream().map(Payment::getPerksCost).toList()));
+		Totals totals = new Totals(newRevenue.add(renewals), newRevenue, renewals, expenses, topupsPaid, perks,
+			newRevenue.add(renewals).subtract(expenses), now.size(), 0,
+			sum(before.stream().map(Payment::getAmount).toList()), previousExpenses);
 
 		// Brands: every brand switched on (an empty one is a fact worth seeing), with the period's revenue.
 		Map<Long, Long> clientsPerBrand = new HashMap<>();
@@ -163,7 +179,7 @@ public class DashboardService {
 			.limit(CHASE_ROWS)
 			.toList();
 
-		return new Overview(period.range(), period.start(), period.end(), period.step().name(), points(now, period), totals,
+		return new Overview(period.range(), period.start(), period.end(), period.step().name(), points(now, topupsNow, period), totals,
 			sum(all.stream().map(Payment::getAmount).toList()), onBooks.size(), brandShares, active, target, credit.summary(), cards,
 			chase);
 	}
@@ -198,8 +214,17 @@ public class DashboardService {
 		return rows.stream().filter(p -> !p.getCreatedAt().isBefore(from) && p.getCreatedAt().isBefore(to)).toList();
 	}
 
-	/** The chart's columns, at the period's step; empty ones included so the axis is even. */
-	private List<Point> points(List<Payment> rows, SeoPeriod period) {
+	/** Top-ups paid between two business days, both included. */
+	private List<CreditTopup> topups(LocalDate start, LocalDate end) {
+		return topups.findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(
+			start.atStartOfDay(zone).toInstant(), end.plusDays(1).atStartOfDay(zone).toInstant());
+	}
+
+	/**
+	 * The chart's columns, at the period's step; empty ones included so the axis is even.
+	 * Expenses: each top-up on the day it was paid, and each payment's perks.
+	 */
+	private List<Point> points(List<Payment> rows, List<CreditTopup> paidOut, SeoPeriod period) {
 		Map<String, BigDecimal[]> buckets = new LinkedHashMap<>();
 		switch (period.step()) {
 			case HOUR -> {
@@ -219,35 +244,38 @@ public class DashboardService {
 		}
 		List<String> keys = new ArrayList<>(buckets.keySet());
 		for (Payment p : rows) {
-			ZonedDateTime at = p.getCreatedAt().atZone(zone);
-			LocalDate day = at.toLocalDate();
-			String key = switch (period.step()) {
-				case HOUR -> period.start() + "T" + String.format("%02d", at.getHour()) + ":00";
-				case DAY -> day.toString();
-				case WEEK -> keys.get((int) Math.min(keys.size() - 1, ChronoUnit.DAYS.between(period.start(), day) / 7));
-				case MONTH -> {
-					LocalDate first = day.withDayOfMonth(1);
-					yield (first.isBefore(period.start()) ? period.start() : first).toString();
-				}
-			};
-			BigDecimal[] bucket = buckets.get(key);
+			BigDecimal[] bucket = buckets.get(bucketKey(p.getCreatedAt(), period, keys));
 			if (bucket == null) continue;
 			if (p.getKind() == Payment.Kind.NEW_PLAN) bucket[0] = bucket[0].add(p.getAmount());
 			else bucket[1] = bucket[1].add(p.getAmount());
-			bucket[2] = bucket[2].add(cost(p));
+			bucket[2] = bucket[2].add(p.getPerksCost());
+		}
+		for (CreditTopup t : paidOut) {
+			BigDecimal[] bucket = buckets.get(bucketKey(t.getCreatedAt(), period, keys));
+			if (bucket != null) bucket[2] = bucket[2].add(t.getAmount());
 		}
 		return buckets.entrySet().stream()
 			.map(e -> new Point(e.getKey(), e.getValue()[0], e.getValue()[1], e.getValue()[2]))
 			.toList();
 	}
 
-	private static BigDecimal[] zeros() {
-		return new BigDecimal[] { BigDecimal.ZERO.setScale(2), BigDecimal.ZERO.setScale(2), BigDecimal.ZERO.setScale(2) };
+	/** The chart column a moment falls in. */
+	private String bucketKey(Instant moment, SeoPeriod period, List<String> keys) {
+		ZonedDateTime at = moment.atZone(zone);
+		LocalDate day = at.toLocalDate();
+		return switch (period.step()) {
+			case HOUR -> period.start() + "T" + String.format("%02d", at.getHour()) + ":00";
+			case DAY -> day.toString();
+			case WEEK -> keys.get((int) Math.max(0, Math.min(keys.size() - 1, ChronoUnit.DAYS.between(period.start(), day) / 7)));
+			case MONTH -> {
+				LocalDate first = day.withDayOfMonth(1);
+				yield (first.isBefore(period.start()) ? period.start() : first).toString();
+			}
+		};
 	}
 
-	/** A payment's cost; one with no plan cost on file counts as nothing (and is counted in `uncosted`). */
-	private static BigDecimal cost(Payment p) {
-		return p.expense() == null ? p.getPerksCost() : p.expense();
+	private static BigDecimal[] zeros() {
+		return new BigDecimal[] { BigDecimal.ZERO.setScale(2), BigDecimal.ZERO.setScale(2), BigDecimal.ZERO.setScale(2) };
 	}
 
 	private static BigDecimal sum(List<BigDecimal> values) {

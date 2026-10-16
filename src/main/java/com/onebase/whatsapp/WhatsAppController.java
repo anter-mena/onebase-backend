@@ -100,7 +100,9 @@ public class WhatsAppController {
 	}
 
 	@GetMapping("/messages/{id}/media")
-	@Operation(summary = "Download the file of a message")
+	@Operation(summary = "Download the file of a message",
+		description = "Our own copy (kept forever). A received file not copied yet is fetched from WhatsApp now; "
+			+ "404 when WhatsApp has deleted it meanwhile.")
 	public ResponseEntity<byte[]> media(@PathVariable long id) {
 		WhatsAppCloudApi.MediaFile file = service.media(id);
 		String name = service.fileName(id);

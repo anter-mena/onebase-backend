@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.onebase.template.TemplateBlock;
 import com.onebase.template.TemplateBlock.ButtonType;
 import com.onebase.template.TemplateBlock.Type;
+import com.onebase.whatsapp.TemplateMessages.Button;
 import com.onebase.whatsapp.TemplateMessages.Interactive;
 import com.onebase.whatsapp.TemplateMessages.Link;
 import com.onebase.whatsapp.TemplateMessages.Media;
@@ -21,7 +22,10 @@ class TemplateMessagesTests {
 	void withoutButtonsEachBlockIsItsOwnMessageAndTheFooterEndsTheLastText() {
 		List<Outgoing> out = TemplateMessages.build(List.of(text("Hello"), image(7), text("Your code: 1234")), "EasyIPTV");
 
-		assertThat(out).containsExactly(new Text("Hello"), new Media(Type.IMAGE, 7, null), new Text("Your code: 1234\n\nEasyIPTV"));
+		assertThat(out).containsExactly(new Text("Hello", null), new Media(Type.IMAGE, 7, null), new Text("Your code: 1234", "EasyIPTV"));
+		// Sent as the last line; kept apart for the conversation.
+		assertThat(((Text) out.get(2)).sent()).isEqualTo("Your code: 1234\n\nEasyIPTV");
+		assertThat(((Text) out.get(0)).sent()).isEqualTo("Hello");
 	}
 
 	@Test
@@ -30,7 +34,7 @@ class TemplateMessagesTests {
 			.containsExactly(new Media(Type.IMAGE, 1, null), new Media(Type.IMAGE, 2, "EasyIPTV"));
 		// An audio takes no caption: the footer goes alone, after it.
 		assertThat(TemplateMessages.build(List.of(audio(3)), "EasyIPTV"))
-			.containsExactly(new Media(Type.AUDIO, 3, null), new Text("EasyIPTV"));
+			.containsExactly(new Media(Type.AUDIO, 3, null), new Text("EasyIPTV", null));
 	}
 
 	@Test
@@ -39,7 +43,7 @@ class TemplateMessagesTests {
 			text("Thanks!")), "EasyIPTV");
 
 		Interactive expected = new Interactive("Trial ends soon", null, List.of("Renew now", "Not now"), null, "EasyIPTV");
-		assertThat(out).containsExactly(expected, new Text("Thanks!"));
+		assertThat(out).containsExactly(expected, new Text("Thanks!", null));
 		Map<String, Object> payload = expected.payload(null, null);
 		assertThat(payload).containsEntry("type", "button")
 			.containsEntry("body", Map.of("text", "Trial ends soon"))
@@ -48,8 +52,9 @@ class TemplateMessagesTests {
 		assertThat(payload.get("action")).isEqualTo(Map.of("buttons", List.of(
 			Map.of("type", "reply", "reply", Map.of("id", "reply_1", "title", "Renew now")),
 			Map.of("type", "reply", "reply", Map.of("id", "reply_2", "title", "Not now")))));
-		// The conversation keeps the words, the footer and the buttons the client saw.
-		assertThat(expected.shown()).isEqualTo("Trial ends soon\n\nEasyIPTV\n[Renew now]\n[Not now]");
+		// The conversation keeps the buttons the client saw.
+		assertThat(expected.buttons()).containsExactly(new Button("QUICK_REPLY", "Renew now", null),
+			new Button("QUICK_REPLY", "Not now", null));
 	}
 
 	@Test
@@ -64,7 +69,7 @@ class TemplateMessagesTests {
 			.containsEntry("header", Map.of("type", "image", "image", Map.of("id", "media-5")))
 			.containsEntry("action", Map.of("name", "cta_url", "parameters", Map.of("display_text", "See offer", "url", "https://x.test/o")))
 			.doesNotContainKey("footer");
-		assertThat(expected.shown()).isEqualTo("New offer\n[See offer]");
+		assertThat(expected.buttons()).containsExactly(new Button("URL", "See offer", "https://x.test/o"));
 	}
 
 	@Test
@@ -72,7 +77,7 @@ class TemplateMessagesTests {
 		List<Outgoing> out = TemplateMessages.build(List.of(pdf(9), reply("Got it"), text("Bye")), "");
 
 		Interactive expected = new Interactive("More info:", new Media(Type.DOCUMENT, 9, null), List.of("Got it"), null, "");
-		assertThat(out).containsExactly(expected, new Text("Bye"));
+		assertThat(out).containsExactly(expected, new Text("Bye", null));
 		assertThat(expected.payload("media-9", "guide.pdf").get("header"))
 			.isEqualTo(Map.of("type", "document", "document", Map.of("id", "media-9", "filename", "guide.pdf")));
 	}
@@ -103,7 +108,7 @@ class TemplateMessagesTests {
 				new Link("Help", "https://help.test"), "Team"));
 		// Alone: no interactive message, the line (then the footer) ends the last text.
 		assertThat(TemplateMessages.build(List.of(text("Hi"), phone("Call us", "+1 514 555 0100"), text("Bye")), "Team"))
-			.containsExactly(new Text("Hi"), new Text("Bye\n\nCall us: +1 514 555 0100\n\nTeam"));
+			.containsExactly(new Text("Hi", null), new Text("Bye\n\nCall us: +1 514 555 0100", "Team"));
 	}
 
 	@Test
@@ -111,6 +116,17 @@ class TemplateMessagesTests {
 		String body = "a".repeat(1100);
 		Interactive message = (Interactive) TemplateMessages.build(List.of(text(body), reply("Ok")), "").getFirst();
 		assertThat(message.body()).hasSize(TemplateMessages.MAX_BODY).endsWith("…");
+	}
+
+	@Test
+	void buttonsAreKeptAsJsonAndReadBack() {
+		tools.jackson.databind.json.JsonMapper json = tools.jackson.databind.json.JsonMapper.builder().build();
+		List<Button> buttons = List.of(new Button("QUICK_REPLY", "Yes", null), new Button("URL", "Open", "https://x.test"));
+		String stored = json.writeValueAsString(buttons);
+		assertThat(stored).isEqualTo("[{\"type\":\"QUICK_REPLY\",\"label\":\"Yes\",\"value\":null},"
+			+ "{\"type\":\"URL\",\"label\":\"Open\",\"value\":\"https://x.test\"}]");
+		assertThat(json.readValue(stored, new tools.jackson.core.type.TypeReference<List<Button>>() {
+		})).isEqualTo(buttons);
 	}
 
 	// ── Helpers ─────────────────────────────────────────────────────────

@@ -37,8 +37,9 @@ final class MailComposer {
 	}
 
 	/**
-	 * Who the email is from, for its design: the brand's name, website and logo (an
-	 * absolute https address, so mail apps can load it). Website and logo may be null.
+	 * Who the email is from, for its design: the brand's name, website and logo (the
+	 * absolute address on the brand's own site, so mail apps can load it). Website and
+	 * logo may be null.
 	 */
 	record Branding(String name, String website, String logoUrl) {
 	}

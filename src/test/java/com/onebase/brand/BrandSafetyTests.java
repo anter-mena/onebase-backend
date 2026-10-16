@@ -4,23 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.onebase.common.ApiException;
-import java.awt.Color;
-import java.awt.Graphics2D;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.net.URI;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
-import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 
 /**
  * The Brands security layer and the readers behind "Add brand", without the
- * internet or a database: address checks, page reading, social links, logos.
+ * internet or a database: address checks, page reading, social links, logo addresses.
  */
 class BrandSafetyTests {
 
@@ -117,9 +108,10 @@ class BrandSafetyTests {
 			.containsEntry("instagram", "https://www.instagram.com/nike")
 			.containsEntry("x", "https://x.com/Nike")
 			.containsEntry("tiktok", "https://www.tiktok.com/@nike");
-		// The phone icon first, then the declared icons biggest first; the SVG is left out.
+		// The phone icon first, then the declared icons biggest first; the SVG last (emails can't show it).
 		assertThat(parsed.icons()).extracting(URI::toString).containsExactly(
-			"https://www.nike.com/apple-icon.png", "https://www.nike.com/favicon-32.png", "https://www.nike.com/favicon-16.png");
+			"https://www.nike.com/apple-icon.png", "https://www.nike.com/favicon-32.png", "https://www.nike.com/favicon-16.png",
+			"https://www.nike.com/logo.svg");
 	}
 
 	@Test
@@ -131,52 +123,37 @@ class BrandSafetyTests {
 		assertThat(BrandLookup.nameFromDomain("new-balance.com")).isEqualTo("New Balance");
 	}
 
-	// ── LogoImages: we only keep a small PNG we made ───────────────────
+	// ── Logos: only the address is kept, a PNG/JPEG first ────────────────
 
 	@Test
-	void aBigLogoIsShrunkAndSavedAsANewPng() throws Exception {
-		byte[] jpeg = picture(600, 300, "jpeg");
-		byte[] stored = LogoImages.toStoredPng(jpeg).orElseThrow();
-		BufferedImage result = ImageIO.read(new ByteArrayInputStream(stored));
-		assertThat(result.getWidth()).isEqualTo(LogoImages.SIZE);
-		assertThat(result.getHeight()).isEqualTo(64);
-		assertThat(stored[1]).isEqualTo((byte) 'P'); // a PNG, whatever came in
+	void theLogosEmailsCanShowAreTriedFirst() {
+		String html = """
+			<html><head>
+			  <link rel="icon" href="/favicon.ico">
+			  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+			  <meta property="og:image" content="https://cdn.nike.com/share.jpg?w=1200">
+			  <link rel="icon" href="http://www.nike.com/icon-64.PNG?v=2" sizes="64x64">
+			</head></html>
+			""";
+		BrandLookup.Parsed parsed = BrandLookup.parse(html, URI.create("https://www.nike.com/"));
+		assertThat(BrandLookup.candidates(parsed.icons(), URI.create("https://www.nike.com/")))
+			.extracting(URI::toString).containsExactly(
+				"http://www.nike.com/icon-64.PNG?v=2", "https://cdn.nike.com/share.jpg?w=1200",
+				"https://www.nike.com/apple-touch-icon.png",
+				"https://www.nike.com/favicon.ico", "https://www.nike.com/logo.svg",
+				"https://www.nike.com/favicon.ico");
 	}
 
 	@Test
-	void aFaviconFileIsRead() throws Exception {
-		byte[] png = picture(48, 48, "png");
-		ByteBuffer ico = ByteBuffer.allocate(6 + 16 + png.length).order(ByteOrder.LITTLE_ENDIAN);
-		ico.putShort((short) 0).putShort((short) 1).putShort((short) 1);
-		ico.put((byte) 48).put((byte) 48).put((byte) 0).put((byte) 0).putShort((short) 1).putShort((short) 32)
-			.putInt(png.length).putInt(22);
-		ico.put(png);
-		assertThat(LogoImages.toStoredPng(ico.array())).isPresent();
-	}
-
-	@Test
-	void whatIsNotAPictureIsRefused() {
-		assertThat(LogoImages.toStoredPng("<svg onload=alert(1)></svg>".getBytes(StandardCharsets.UTF_8))).isEmpty();
-		assertThat(LogoImages.toStoredPng("<html>not an image</html>".getBytes(StandardCharsets.UTF_8))).isEmpty();
-		assertThat(LogoImages.toStoredPng(new byte[3])).isEmpty();
-	}
-
-	@Test
-	void aPictureClaimingToBeHugeIsRefusedBeforeDecoding() throws Exception {
-		// A real PNG header saying 20000 × 20000 pixels: refused from the header alone.
-		byte[] png = picture(10, 10, "png");
-		ByteBuffer.wrap(png).putInt(16, 20_000).putInt(20, 20_000);
-		assertThat(LogoImages.toStoredPng(png)).isEmpty();
-	}
-
-	private static byte[] picture(int width, int height, String format) throws Exception {
-		BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-		Graphics2D g = image.createGraphics();
-		g.setColor(Color.ORANGE);
-		g.fillRect(0, 0, width, height);
-		g.dispose();
-		ByteArrayOutputStream out = new ByteArrayOutputStream();
-		ImageIO.write(image, format, out);
-		return out.toByteArray();
+	void onlyPngJpegGifAndWebpCountAsPicturesForEmails() {
+		assertThat(Brand.isPicture("https://nike.com/a.png")).isTrue();
+		assertThat(Brand.isPicture("https://nike.com/a.JPG?v=1")).isTrue();
+		assertThat(Brand.isPicture("https://nike.com/a.jpeg#x")).isTrue();
+		assertThat(Brand.isPicture("https://nike.com/a.gif")).isTrue();
+		assertThat(Brand.isPicture("https://nike.com/a.webp")).isTrue();
+		assertThat(Brand.isPicture("https://nike.com/favicon.ico")).isFalse();
+		assertThat(Brand.isPicture("https://nike.com/logo.svg?as=.png")).isFalse();
+		assertThat(Brand.isPicture("https://nike.com/icon")).isFalse();
+		assertThat(Brand.isPicture(null)).isFalse();
 	}
 }

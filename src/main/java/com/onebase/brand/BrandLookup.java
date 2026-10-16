@@ -21,14 +21,18 @@ import org.springframework.stereotype.Component;
 
 /**
  * Reads a brand's website and finds what the Add form fills in: the name, the
- * four social links, and a logo.
+ * four social links, and the address of its logo.
  *
  * <p>It <b>suggests</b>; the Admin decides. Many sites block robots, link the
  * wrong account, or have no usable icon — so whatever is found is shown first
  * and can be corrected before saving, and a site that can't be read still lets
  * the Admin type everything in (see {@link Result#warning()}).
  *
- * <p>Downloads only through {@link SafeFetcher}. jsoup is used to read HTML
+ * <p>The logo is not downloaded or kept (decided 2026-10-16): we keep its
+ * https address on the brand's site, and screens and emails load it from there.
+ * A PNG/JPEG (what emails can show) is preferred over an ICO or SVG.
+ *
+ * <p>Opens addresses only through {@link SafeFetcher}. jsoup is used to read HTML
  * already downloaded, never to open a connection.
  */
 @Component
@@ -36,8 +40,11 @@ class BrandLookup {
 
 	/** Enough for the head and footer of any real home page. */
 	static final int MAX_PAGE_BYTES = 2 * 1024 * 1024;
-	static final int MAX_ICON_BYTES = 512 * 1024;
-	private static final int MAX_ICON_TRIES = 5;
+	/** An icon is only asked for to check that it is there: a couple of bytes are read, then the line is closed. */
+	private static final int CHECK_BYTES = 1;
+	private static final int MAX_ICON_TRIES = 6;
+	/** The size of the {@code brands.logo_url} column. */
+	static final int MAX_LOGO_URL = 2000;
 
 	private final SafeFetcher fetcher;
 
@@ -46,7 +53,7 @@ class BrandLookup {
 	}
 
 	/** What was found. {@code warning} says what could not be, in a sentence for the Admin. */
-	record Result(String name, Map<String, String> socials, byte[] logoPng, String warning) {
+	record Result(String name, Map<String, String> socials, String logoUrl, String warning) {
 	}
 
 	/** @throws UrlGuard.BlockedUrlException when the address (or a redirect) is not a public website */
@@ -54,18 +61,16 @@ class BrandLookup {
 		String guessedName = nameFromDomain(website.domain());
 		Optional<SafeFetcher.Fetched> page = fetcher.get(website.uri(), MAX_PAGE_BYTES, "text/html,application/xhtml+xml");
 		if (page.isEmpty() || !page.get().contentType().contains("html")) {
-			byte[] logo = fetchFirstLogo(fallbackIcons(website.uri())).orElse(null);
+			String logo = firstWorkingLogo(candidates(List.of(), website.uri())).orElse(null);
 			return new Result(guessedName, Map.of(), logo,
 				"The website couldn't be read (it may block robots). Check the name and add the links yourself.");
 		}
 
 		Parsed parsed = parse(decode(page.get()), page.get().finalUri());
-		List<URI> icons = new ArrayList<>(parsed.icons());
-		icons.addAll(fallbackIcons(page.get().finalUri()));
-		byte[] logo = fetchFirstLogo(icons).orElse(null);
+		String logo = firstWorkingLogo(candidates(parsed.icons(), page.get().finalUri())).orElse(null);
 
 		String name = parsed.name() == null ? guessedName : parsed.name();
-		String warning = logo == null ? "No logo could be found on the site. You can upload one." : null;
+		String warning = logo == null ? "No logo could be found on the site. You can paste its address." : null;
 		return new Result(name, parsed.socials(), logo, warning);
 	}
 
@@ -141,7 +146,12 @@ class BrandLookup {
 		return found;
 	}
 
-	/** The site's own icons, best first: the large phone icon, then declared icons, biggest first. */
+	/**
+	 * The site's own logos and icons, best first. PNG/JPEG/GIF/WebP before anything
+	 * else (ICO, SVG, no extension), since emails can't show the others; within each,
+	 * the large phone icon, a declared logo, the declared icons biggest first, and
+	 * last the page's share picture ({@code og:image}).
+	 */
 	private static List<URI> findIcons(Document doc) {
 		record Icon(String href, int size, int rank) {
 		}
@@ -149,17 +159,23 @@ class BrandLookup {
 		for (Element link : doc.select("link[rel][href]")) {
 			String rel = link.attr("rel").toLowerCase(Locale.ROOT);
 			String href = link.attr("abs:href");
-			if (href.isBlank() || href.toLowerCase(Locale.ROOT).endsWith(".svg")
-					|| link.attr("type").toLowerCase(Locale.ROOT).contains("svg")) {
-				continue;
-			}
+			if (href.isBlank()) continue;
 			int size = largestSize(link.attr("sizes"));
 			if (rel.contains("apple-touch-icon")) icons.add(new Icon(href, Math.max(size, 180), 0));
-			else if (rel.contains("icon")) icons.add(new Icon(href, size, 1));
+			else if (rel.contains("icon")) icons.add(new Icon(href, size, 2));
 		}
-		icons.sort(Comparator.comparingInt(Icon::rank).thenComparing(Comparator.comparingInt(Icon::size).reversed()));
+		for (Element meta : doc.select("meta[property=og:logo][content], meta[itemprop=logo][content]")) {
+			icons.add(new Icon(meta.attr("abs:content"), 0, 1));
+		}
+		for (Element meta : doc.select("meta[property=og:image][content], meta[property=og:image:secure_url][content]")) {
+			icons.add(new Icon(meta.attr("abs:content"), 0, 3));
+		}
+		icons.sort(Comparator.comparing((Icon icon) -> !Brand.isPicture(icon.href()))
+			.thenComparingInt(Icon::rank)
+			.thenComparing(Comparator.comparingInt(Icon::size).reversed()));
 		List<URI> uris = new ArrayList<>();
 		for (Icon icon : icons) {
+			if (icon.href().isBlank()) continue;
 			try {
 				uris.add(URI.create(icon.href()));
 			} catch (IllegalArgumentException ignored) {
@@ -178,26 +194,57 @@ class BrandLookup {
 		return best;
 	}
 
-	/** Where most sites keep an icon even when the page doesn't say so. */
-	private static List<URI> fallbackIcons(URI site) {
-		return List.of(site.resolve("/apple-touch-icon.png"), site.resolve("/favicon.ico"));
+	/**
+	 * What to try, best first: the page's PNG/JPEG logos, then where most sites keep
+	 * one even when the page doesn't say so, then the page's ICO/SVG icons, and last
+	 * {@code /favicon.ico}.
+	 */
+	static List<URI> candidates(List<URI> pageIcons, URI site) {
+		List<URI> ordered = new ArrayList<>();
+		for (URI icon : pageIcons) if (Brand.isPicture(icon.toString())) ordered.add(icon);
+		ordered.add(site.resolve("/apple-touch-icon.png"));
+		for (URI icon : pageIcons) if (!Brand.isPicture(icon.toString())) ordered.add(icon);
+		ordered.add(site.resolve("/favicon.ico"));
+		return ordered;
 	}
 
-	/** The first icon that downloads safely and is a picture we can read. */
-	private Optional<byte[]> fetchFirstLogo(List<URI> icons) {
+	/**
+	 * The https address of the first candidate that answers with a picture. Only
+	 * https is kept — the app and mail apps refuse plain http pictures — so an
+	 * {@code http://} icon is asked for over https. Nothing is downloaded beyond
+	 * the first bytes, and nothing is kept but the address.
+	 */
+	private Optional<String> firstWorkingLogo(List<URI> icons) {
 		int tries = 0;
 		for (URI icon : new LinkedHashSet<>(icons)) {
+			URI https = toHttps(icon);
+			if (https == null || https.toString().length() > MAX_LOGO_URL) continue;
 			if (tries++ >= MAX_ICON_TRIES) break;
 			try {
-				Optional<SafeFetcher.Fetched> fetched = fetcher.get(icon, MAX_ICON_BYTES, "image/*");
-				if (fetched.isEmpty() || fetched.get().truncated()) continue;
-				Optional<byte[]> png = LogoImages.toStoredPng(fetched.get().body());
-				if (png.isPresent()) return png;
+				Optional<SafeFetcher.Fetched> fetched = fetcher.get(https, CHECK_BYTES, "image/*");
+				// A missing icon often comes back as the site's own "not found" page, with a 200.
+				if (fetched.isPresent() && !fetched.get().contentType().contains("html")
+						&& !fetched.get().contentType().startsWith("text/")) {
+					return Optional.of(https.toString());
+				}
 			} catch (UrlGuard.BlockedUrlException e) {
 				// An icon pointing somewhere not allowed: try the next one.
 			}
 		}
 		return Optional.empty();
+	}
+
+	private static URI toHttps(URI uri) {
+		String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+		if (scheme.equals("https")) return uri;
+		if (!scheme.equals("http") || uri.getHost() == null) return null;
+		if (uri.getPort() != -1 && uri.getPort() != 80) return null;
+		String path = uri.getRawPath() == null || uri.getRawPath().isEmpty() ? "/" : uri.getRawPath();
+		try {
+			return URI.create("https://" + uri.getHost() + path + (uri.getRawQuery() == null ? "" : "?" + uri.getRawQuery()));
+		} catch (IllegalArgumentException e) {
+			return null;
+		}
 	}
 
 	private static String decode(SafeFetcher.Fetched page) {

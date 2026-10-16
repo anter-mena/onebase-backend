@@ -121,6 +121,70 @@ class DashboardModuleTests {
 			.header("Authorization", "Bearer " + admin)).andExpect(status().isBadRequest());
 	}
 
+	@Test
+	void moneyOutIsTheTopUpsPaidAndThePerksNotThePlanCost() throws Exception {
+		String admin = token("dash-cash-admin@onebase.test", UserRole.ADMIN);
+		String before = mvc.perform(get("/api/dashboard").param("range", "today").header("Authorization", "Bearer " + admin))
+			.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+		long brand = jdbc.queryForObject("insert into brands (name, domain, website_url) values ('Cash Brand', 'cash.test', 'https://cash.test') returning id", Long.class);
+		long card = jdbc.queryForObject("insert into payment_methods (provider, name, holder) values ('PAYPAL', 'Cash PayPal', 'T') returning id", Long.class);
+		long perk = jdbc.queryForObject("insert into perks (name, cost) values ('Cash Perk', 3.25) returning id", Long.class);
+		long client = whatsAppClient("212633330002");
+		// A sale: its plan's cost is not money out (the credit was paid by a top-up); its perk is.
+		mvc.perform(post("/api/clients/" + client + "/payments").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"kind\":\"NEW_PLAN\",\"devices\":1,\"months\":1,\"amount\":50,\"brandId\":" + brand
+					+ ",\"paymentMethodId\":" + card + ",\"perks\":[{\"perkId\":" + perk + ",\"quantity\":2}]}"))
+			.andExpect(status().isCreated());
+		// A top-up: money out today.
+		mvc.perform(post("/api/credit/topups").header("Authorization", "Bearer " + admin).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"credits\":100,\"amount\":120,\"note\":\"Cash view top-up\"}"))
+			.andExpect(status().isCreated());
+
+		String today = mvc.perform(get("/api/dashboard").param("range", "today").header("Authorization", "Bearer " + admin))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.totals.uncosted").value(0))
+			.andReturn().getResponse().getContentAsString();
+		assertThat(delta(today, before, "$.totals.topups")).isEqualByComparingTo("120");
+		assertThat(delta(today, before, "$.totals.perks")).isEqualByComparingTo("6.50");
+		assertThat(delta(today, before, "$.totals.expenses")).isEqualByComparingTo("126.50");
+		assertThat(number(today, "$.totals.expenses"))
+			.isEqualByComparingTo(number(today, "$.totals.topups").add(number(today, "$.totals.perks")));
+		assertThat(number(today, "$.totals.net"))
+			.isEqualByComparingTo(number(today, "$.totals.revenue").subtract(number(today, "$.totals.expenses")));
+		double chartExpenses = JsonPath.<List<Number>>read(today, "$.points[*].expenses").stream().mapToDouble(Number::doubleValue).sum();
+		assertThat(new BigDecimal(String.valueOf(chartExpenses))).isEqualByComparingTo(number(today, "$.totals.expenses"));
+
+		// The Ledger lists the top-up as money out — but not when filtered to an account (it is paid from none).
+		String ledger = mvc.perform(get("/api/ledger").param("range", "today").header("Authorization", "Bearer " + admin))
+			.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+		assertThat(JsonPath.<List<String>>read(ledger, "$.topups[?(@.note == 'Cash view top-up')].createdByName"))
+			.containsExactly("Test User");
+		assertThat(JsonPath.<List<Integer>>read(ledger, "$.topups[?(@.note == 'Cash view top-up')].credits")).containsExactly(100);
+		double rowsIn = JsonPath.<List<Number>>read(ledger, "$.rows[*].payment.amount").stream().mapToDouble(Number::doubleValue).sum();
+		assertThat(number(ledger, "$.moneyIn")).isEqualByComparingTo(new BigDecimal(String.valueOf(rowsIn)));
+		assertThat(number(ledger, "$.moneyOut")).isEqualByComparingTo(number(today, "$.totals.expenses"));
+		assertThat(number(ledger, "$.net")).isEqualByComparingTo(number(ledger, "$.moneyIn").subtract(number(ledger, "$.moneyOut")));
+
+		String onlyCard = mvc.perform(get("/api/ledger").param("range", "today").param("methodId", String.valueOf(card))
+				.header("Authorization", "Bearer " + admin))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.topups.length()").value(0))
+			.andReturn().getResponse().getContentAsString();
+		assertThat(number(onlyCard, "$.moneyIn")).isEqualByComparingTo("50");
+		assertThat(number(onlyCard, "$.moneyOut")).isEqualByComparingTo("6.50");
+		assertThat(number(onlyCard, "$.net")).isEqualByComparingTo("43.50");
+	}
+
+	private static BigDecimal number(String json, String path) {
+		return new BigDecimal(JsonPath.read(json, path).toString());
+	}
+
+	private static BigDecimal delta(String after, String before, String path) {
+		return number(after, path).subtract(number(before, path));
+	}
+
 	private void pay(String token, long clientId, String kind, String amount, long brand, long method) throws Exception {
 		mvc.perform(post("/api/clients/" + clientId + "/payments").header("Authorization", "Bearer " + token)
 				.contentType(MediaType.APPLICATION_JSON)

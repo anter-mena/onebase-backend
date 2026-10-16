@@ -49,7 +49,7 @@ public class PaymentController {
 	}
 
 	@GetMapping("/api/ledger")
-	@Operation(summary = "The Ledger (Admins)", description = "Every payment received in the period, newest first. "
+	@Operation(summary = "The Ledger (Admins)", description = "Every payment received in the period, newest first, and the panel-credit top-ups paid in it (money out; none when filtered to one account). "
 		+ "range: today, yesterday, 7d, month, year, custom (with from and to). methodId: only one account.")
 	public PaymentDtos.Ledger ledger(@RequestParam(required = false) Long methodId, @RequestParam(required = false) String range,
 			@RequestParam(required = false) String from, @RequestParam(required = false) String to) {

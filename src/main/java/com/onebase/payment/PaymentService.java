@@ -8,6 +8,7 @@ import com.onebase.brand.BrandRepository;
 import com.onebase.client.Client;
 import com.onebase.client.ClientRepository;
 import com.onebase.common.ApiException;
+import com.onebase.credit.CreditTopup;
 import com.onebase.credit.CreditTopupRepository;
 import com.onebase.payment.Payment.Kind;
 import com.onebase.payment.Payment.PerkLine;
@@ -160,12 +161,18 @@ public class PaymentService {
 	/**
 	 * The Ledger (decided 2026-10-06): every payment received in the period, newest
 	 * first, optionally only those paid to one account. Admins only (SecurityConfig).
+	 *
+	 * <p>A cash view (decided 2026-10-16): the panel-credit top-ups paid in the period
+	 * are listed as money out, with the perks of the payments. A top-up is paid from no
+	 * account, so a Ledger filtered to one has none.
 	 */
 	@Transactional(readOnly = true)
 	public PaymentDtos.Ledger ledger(Long methodId, String range, String from, String to) {
 		com.onebase.seo.SeoPeriod period = com.onebase.seo.SeoPeriod.of(range, from, to, LocalDate.now(zone));
+		java.time.Instant start = period.start().atStartOfDay(zone).toInstant();
+		java.time.Instant end = period.end().plusDays(1).atStartOfDay(zone).toInstant();
 		List<Payment> rows = payments.findByDeletedAtIsNullAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(
-			period.start().atStartOfDay(zone).toInstant(), period.end().plusDays(1).atStartOfDay(zone).toInstant());
+			start, end);
 		if (methodId != null) rows = rows.stream().filter(p -> methodId.equals(p.getPaymentMethodId())).toList();
 		Map<Long, Client> owners = clients.findAllById(rows.stream().map(Payment::getClientId).distinct().toList()).stream()
 			.collect(Collectors.toMap(Client::getId, Function.identity()));
@@ -175,7 +182,19 @@ public class PaymentService {
 			Client owner = owners.get(rows.get(i).getClientId());
 			lines.add(new PaymentDtos.LedgerRow(views.get(i), rows.get(i).getClientId(), owner == null ? "—" : owner.displayName()));
 		}
-		return new PaymentDtos.Ledger(period.range(), period.start(), period.end(), methodId, lines);
+		List<CreditTopup> paidOut = methodId != null ? List.of()
+			: topups.findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(start, end);
+		Map<Long, String> buyers = users.findAllById(paidOut.stream().map(CreditTopup::getCreatedBy)
+				.filter(java.util.Objects::nonNull).distinct().toList()).stream()
+			.collect(Collectors.toMap(User::getId, User::getFullName));
+		List<PaymentDtos.TopupRow> topupRows = paidOut.stream().map(t -> new PaymentDtos.TopupRow(t.getId(), t.getCredits(),
+			t.getAmount(), t.getNote(), t.getCreatedAt(), t.getCreatedBy() == null ? null : buyers.get(t.getCreatedBy()))).toList();
+
+		BigDecimal moneyIn = rows.stream().map(Payment::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2);
+		BigDecimal moneyOut = paidOut.stream().map(CreditTopup::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add)
+			.add(rows.stream().map(Payment::getPerksCost).reduce(BigDecimal.ZERO, BigDecimal::add)).setScale(2);
+		return new PaymentDtos.Ledger(period.range(), period.start(), period.end(), methodId, lines, topupRows, moneyIn,
+			moneyOut, moneyIn.subtract(moneyOut));
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────────

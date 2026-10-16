@@ -50,5 +50,6 @@ public class CreditTopup {
 	public int getCredits() { return credits; }
 	public BigDecimal getAmount() { return amount; }
 	public String getNote() { return note; }
+	public Long getCreatedBy() { return createdBy; }
 	public Instant getCreatedAt() { return createdAt; }
 }

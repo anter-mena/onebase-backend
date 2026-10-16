@@ -22,7 +22,8 @@ import java.util.Map;
  * <li>quick replies win over a link: WhatsApp shows reply buttons or one link, never
  *     both. What does not fit, and every phone button, becomes a line of the body,
  *     "Label: value" (WhatsApp makes numbers and links tappable);</li>
- * <li>the footer is the interactive message's footer, else the last line of the last text.</li>
+ * <li>the footer is the interactive message's footer, else the last line of the last text
+ *     (kept apart as {@link Text#footer()}, so the conversation can show it grey).</li>
  * </ul>
  * Pure: no Meta, no database. Files stay ids here; {@code WhatsAppService} uploads them.
  */
@@ -40,16 +41,24 @@ public final class TemplateMessages {
 	private TemplateMessages() {
 	}
 
-	/** One message to send. {@link #shown()} is what the conversation keeps of it. */
+	/** One message to send. */
 	public sealed interface Outgoing permits Text, Media, Interactive {
-		String shown();
 	}
 
-	public record Text(String body) implements Outgoing {
-		@Override
-		public String shown() {
-			return body;
+	/**
+	 * A text. {@code footer} (or null) is sent as its last line but kept apart in the
+	 * conversation, which shows it grey: {@code body} is the text without it.
+	 */
+	public record Text(String body, String footer) implements Outgoing {
+
+		/** What WhatsApp receives. */
+		public String sent() {
+			return cut(paragraphs(body, footer), MAX_TEXT);
 		}
+	}
+
+	/** A button as WhatsApp shows it, kept with the message: QUICK_REPLY (value null) or URL (value the link). */
+	public record Button(String type, String label, String value) {
 	}
 
 	/** A photo, PDF or audio; {@code caption} may be null (an audio never has one). */
@@ -58,11 +67,6 @@ public final class TemplateMessages {
 		/** Meta's media kind: image, document or audio. */
 		public String kind() {
 			return type.name().toLowerCase(Locale.ROOT);
-		}
-
-		@Override
-		public String shown() {
-			return caption;
 		}
 	}
 
@@ -105,13 +109,10 @@ public final class TemplateMessages {
 			return interactive;
 		}
 
-		/** The conversation shows the text, then a line "[Label]" per button the client saw. */
-		@Override
-		public String shown() {
-			StringBuilder shown = new StringBuilder(paragraphs(body, footer));
-			List<String> labels = replies.isEmpty() ? List.of(link.label()) : replies;
-			for (String label : labels) shown.append('\n').append('[').append(cut(label, MAX_BUTTON_TITLE)).append(']');
-			return cut(shown.toString(), MAX_TEXT);
+		/** The buttons the client sees under it (lines of the body are not buttons). */
+		public List<Button> buttons() {
+			if (replies.isEmpty()) return List.of(new Button("URL", cut(link.label(), MAX_BUTTON_TITLE), link.url()));
+			return replies.stream().map(label -> new Button("QUICK_REPLY", cut(label, MAX_BUTTON_TITLE), null)).toList();
 		}
 	}
 
@@ -149,8 +150,10 @@ public final class TemplateMessages {
 			String extra = paragraphs(lines, footer);
 			int carrier = lastText(parts);
 			int last = carrier >= 0 ? carrier : lastCaptioned(parts);
-			for (int i = 0; i < parts.size(); i++) out.add(single(parts.get(i), i == last ? extra : ""));
-			if (last < 0 && !extra.isEmpty()) out.add(text(extra));
+			for (int i = 0; i < parts.size(); i++) {
+				out.add(i == last ? single(parts.get(i), lines, footer) : single(parts.get(i), "", ""));
+			}
+			if (last < 0 && !extra.isEmpty()) out.add(new Text(cut(extra, MAX_TEXT), null));
 			return out;
 		}
 
@@ -176,7 +179,7 @@ public final class TemplateMessages {
 		int at = bodyIndex < 0 ? headerIndex : headerIndex < 0 ? bodyIndex : Math.min(bodyIndex, headerIndex);
 		for (int i = 0; i < parts.size(); i++) {
 			if (i == at) out.add(message);
-			if (i != bodyIndex && i != headerIndex) out.add(single(parts.get(i), ""));
+			if (i != bodyIndex && i != headerIndex) out.add(single(parts.get(i), "", ""));
 		}
 		if (at < 0) out.add(message);
 		return out;
@@ -201,14 +204,14 @@ public final class TemplateMessages {
 		return -1;
 	}
 
-	private static Outgoing single(TemplateBlock block, String extra) {
-		if (block.getType() == Type.TEXT) return text(paragraphs(block.getText(), extra));
+	/** A block on its own; the last one may also carry the lines and the footer. */
+	private static Outgoing single(TemplateBlock block, String lines, String footer) {
+		if (block.getType() == Type.TEXT) {
+			return new Text(cut(paragraphs(block.getText(), lines), MAX_TEXT), footer.isEmpty() ? null : footer);
+		}
+		String extra = paragraphs(lines, footer);
 		String caption = extra.isEmpty() || block.getType() == Type.AUDIO ? null : cut(extra, MAX_BODY);
 		return new Media(block.getType(), block.getFileId(), caption);
-	}
-
-	private static Text text(String body) {
-		return new Text(cut(body, MAX_TEXT));
 	}
 
 	/** The non-empty pieces, a blank line apart. */
