@@ -56,6 +56,10 @@ services:
     environment:
       # Not a secret: an address that exists only inside this compose network.
       - DOCKER_API_URL=http://docker-socket-proxy:2375
+      # IPv4 only (2026-10-28). This network has no IPv6 route, but Google's names also
+      # resolve to IPv6, and whenever Java tried that address first, Gmail and GA4
+      # failed with "Network is unreachable" — the "did not answer" that came and went.
+      - JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true
     volumes:
       # System status → Server. Both read-only, both a single file:
       # - the machine's OS name (inside the container it would say the image's Linux);
@@ -145,6 +149,8 @@ services:
       - N8N_PROXY_HOPS=1
       - GENERIC_TIMEZONE=America/Toronto
       - TZ=America/Toronto
+      # IPv4 first: this network has no IPv6 route (same reason as the backend's setting).
+      - NODE_OPTIONS=--dns-result-order=ipv4first
       # Nothing about this instance is sent to n8n.
       - N8N_DIAGNOSTICS_ENABLED=false
       - N8N_VERSION_NOTIFICATIONS_ENABLED=false
