@@ -10,6 +10,7 @@ import com.onebase.client.ClientRepository;
 import com.onebase.common.ApiException;
 import com.onebase.credit.CreditTopup;
 import com.onebase.credit.CreditTopupRepository;
+import com.onebase.credit.LowCredit;
 import com.onebase.payment.Payment.Kind;
 import com.onebase.payment.Payment.PerkLine;
 import com.onebase.payment.PaymentDtos.CreatePaymentRequest;
@@ -41,6 +42,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -86,11 +88,15 @@ public class PaymentService {
 	private final CreditTopupRepository topups;
 	private final UserRepository users;
 	private final ActionLogService actionLog;
+	private final ApplicationEventPublisher events;
 	private final ZoneId zone;
+	/** Credits left at which the team is warned by email (LowCreditAlerts). */
+	private final int lowCredit;
 
 	public PaymentService(PaymentRepository payments, PaymentProofRepository proofs, ClientRepository clients, PlanRepository plans, PerkRepository perks,
 			BrandRepository brands, PaymentMethodRepository methods, CreditTopupRepository topups, UserRepository users,
-			ActionLogService actionLog, @Value("${onebase.timezone:America/Toronto}") String zone) {
+			ActionLogService actionLog, ApplicationEventPublisher events, @Value("${onebase.timezone:America/Toronto}") String zone,
+			@Value("${onebase.credit.low-threshold:50}") int lowCredit) {
 		this.payments = payments;
 		this.proofs = proofs;
 		this.clients = clients;
@@ -101,7 +107,9 @@ public class PaymentService {
 		this.topups = topups;
 		this.users = users;
 		this.actionLog = actionLog;
+		this.events = events;
 		this.zone = ZoneId.of(zone);
+		this.lowCredit = lowCredit;
 	}
 
 	@Transactional(readOnly = true)
@@ -148,6 +156,8 @@ public class PaymentService {
 		log.info("User id={} added payment id={} for client id={}", principal.userId(), payment.getId(), client.getId());
 
 		long remaining = topups.totalCredits() - payments.totalCreditsUsed();
+		// Down to the low mark with this payment: the team is emailed once it is saved (2026-10-28).
+		if (LowCredit.crossed(remaining + credits, remaining, lowCredit)) events.publishEvent(new LowCredit(payment.getId(), remaining, lowCredit));
 		String warning = credits > 0 && remaining < 0
 			? "Saved — but the panel credit is now at " + remaining + ". Top it up in Configuration → Expenses."
 			: null;

@@ -106,6 +106,8 @@ services:
       - "443:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # n8n's browser password (see the Caddyfile). Only on the server, never in git.
+      - ./caddy-auth:/etc/caddy/auth:ro
       # The certificates. Kept across redeploys so Let's Encrypt is not asked again.
       - caddy_data:/data
       - caddy_config:/config

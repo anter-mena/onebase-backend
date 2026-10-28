@@ -5,6 +5,7 @@ import com.onebase.user.UserRole;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -15,7 +16,8 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 /**
- * Sends the emails auth needs: the password-reset link and the invitation.
+ * Sends the emails auth needs (the password-reset link and the invitation), and the
+ * team's alerts (the low panel credit).
  *
  * <p>Each one carries both versions from {@link EmailTemplates}: the designed
  * HTML and plain text. Images load from the frontend's public folder
@@ -50,6 +52,29 @@ public class MailService {
 	/** The invitation. The inviter's optional message is quoted as they wrote it. */
 	public void sendInvitation(String to, String invitedBy, UserRole role, String message, String link) {
 		send(to, EmailTemplates.invitation(invitedBy, role, message, link, assetBase), link);
+	}
+
+	/**
+	 * A warning to the team (the low panel credit, 2026-10-28): one email to everyone in
+	 * {@code to}. Fails loudly to the caller, which logs it; it runs in the background.
+	 */
+	public void sendAlert(List<String> to, String subject, String text, String html) {
+		JavaMailSender mail = sender.getIfAvailable();
+		if (mail == null) {
+			log.warn("No mail server configured (SPRING_MAIL_HOST) — alert \"{}\" not sent", subject);
+			return;
+		}
+		try {
+			MimeMessage message = mail.createMimeMessage();
+			MimeMessageHelper helper = new MimeMessageHelper(message, true, StandardCharsets.UTF_8.name());
+			helper.setFrom(from);
+			helper.setTo(to.toArray(String[]::new));
+			helper.setSubject(subject);
+			helper.setText(text, html);
+			mail.send(message);
+		} catch (MessagingException e) {
+			throw new IllegalStateException("Could not build the alert email", e);
+		}
 	}
 
 	private void send(String to, Email email, String link) {

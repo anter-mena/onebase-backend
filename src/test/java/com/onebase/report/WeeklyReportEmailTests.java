@@ -51,8 +51,8 @@ class WeeklyReportEmailTests {
 		assertThat(html).contains("Weekly report").contains("Sun 18 – Sat 24 Oct 2026 · Week 43").contains("$1,248.32")
 			.contains("Easy IPTV").contains("2,310 sessions").contains("https://app.test/Logo.png")
 			.contains("dashboard?range=custom&amp;from=2026-10-18&amp;to=2026-10-24");
-		// Light even in dark mode, and as wide as the phone up to 480 px (2026-10-28).
-		assertThat(html).contains("<meta name=\"color-scheme\" content=\"light only\">").contains("max-width:480px")
+		// In dark mode the ticket stays light and the page follows; as wide as the phone up to 480 px.
+		assertThat(html).contains(".ob-card{background:#ffffff!important").contains(".ob-page,.ob-hole{background:#121212!important}").contains("max-width:480px")
 			.doesNotContain("width=\"480\"").contains("@media (max-width:520px)");
 		// A client named like a script is shown as text.
 		assertThat(html).doesNotContain("<script>").contains("&lt;script&gt;");

@@ -59,6 +59,7 @@ import org.springframework.test.web.servlet.ResultActions;
 	"onebase.whatsapp.verify-token=verify-me",
 	"onebase.timezone=America/Toronto",
 	"onebase.report.key=test-report-key",
+	"onebase.alerts.emails=team@onebase.test",
 })
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
@@ -240,6 +241,32 @@ class PaymentModuleTests {
 		mvc.perform(get("/api/reports/weekly").param("format", "html").header("X-Report-Key", "test-report-key"))
 			.andExpect(status().isOk())
 			.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentTypeCompatibleWith(MediaType.TEXT_HTML));
+	}
+
+	@Test
+	void aPaymentThatTakesTheCreditDownToFiftyWarnsTheTeamOnce() throws Exception {
+		String admin = token("pay-lowcredit@onebase.test", UserRole.ADMIN);
+		long clientId = whatsAppClient("212622220030");
+		long brandId = brand("Low Credit Brand", "lowcredit.test");
+		long method = method("PAYPAL", "Low Credit PayPal");
+		int planCredits = plans.findByDevicesAndMonths((short) 2, (short) 3).orElseThrow().getCredits();
+		// Top up so that this plan's payment lands exactly on 50.
+		String credit = mvc.perform(get("/api/credit").header("Authorization", "Bearer " + admin)).andReturn().getResponse().getContentAsString();
+		long left = ((Number) JsonPath.read(credit, "$.remainingCredits")).longValue();
+		long topUp = 50 + planCredits - left;
+		org.junit.jupiter.api.Assumptions.assumeTrue(topUp > 0, "the shared test database already holds more credit than this test can bring to 50");
+		mvc.perform(post("/api/credit/topups").header("Authorization", "Bearer " + admin).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"credits\":" + topUp + ",\"amount\":1,\"note\":\"Low credit test\"}"))
+			.andExpect(status().isCreated());
+
+		pay(admin, clientId, "NEW_PLAN", 2, 3, "10", brandId, method, null, 0).andExpect(status().isCreated());
+		org.mockito.Mockito.verify(mail, org.mockito.Mockito.timeout(5000)).sendAlert(org.mockito.ArgumentMatchers.eq(java.util.List.of("team@onebase.test")),
+			org.mockito.ArgumentMatchers.eq("One Base · Panel credit low: 50 credits left"), org.mockito.ArgumentMatchers.anyString(),
+			org.mockito.ArgumentMatchers.contains("Went below with"));
+		// Already low: the next payment says nothing more.
+		pay(admin, clientId, "RENEWAL", 2, 3, "10", brandId, method, null, 0).andExpect(status().isCreated());
+		org.mockito.Mockito.verify(mail, org.mockito.Mockito.after(2000).times(1)).sendAlert(org.mockito.ArgumentMatchers.any(),
+			org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
 	}
 
 	@Test

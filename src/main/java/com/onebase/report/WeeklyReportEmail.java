@@ -35,19 +35,19 @@ public final class WeeklyReportEmail {
 	private static final DateTimeFormatter SHORT = DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH);
 
 	/**
-	 * Light, whatever the reader's mode (2026-10-28): the colour-scheme signals that Apple
-	 * Mail, iOS Mail and Outlook honour, and Outlook.com's own dark-mode markers. Then the
-	 * phone layout: narrower sides and Net. Two blocks, because Gmail throws away a whole
-	 * block over one rule it does not support.
+	 * The ticket stays light in dark mode; the page around it, and the notches and scallops
+	 * that show it, follow the reader (2026-10-28), in the mail apps that honour
+	 * prefers-color-scheme and Outlook.com's markers. Then the phone layout: narrower sides
+	 * and Net. Two blocks, because Gmail throws away a whole block over one rule it does not support.
 	 */
-	private static final String HEAD_STYLES = "<meta name=\"color-scheme\" content=\"light only\">"
-		+ "<meta name=\"supported-color-schemes\" content=\"light\">"
+	private static final String HEAD_STYLES = "<meta name=\"color-scheme\" content=\"light dark\">"
+		+ "<meta name=\"supported-color-schemes\" content=\"light dark\">"
 		+ "<style>@media (max-width:520px){.page{padding:12px 6px!important}.px{padding-left:16px!important;padding-right:16px!important}"
 		+ ".net{font-size:28px!important}}</style>"
-		+ "<style>:root{color-scheme:light only;supported-color-schemes:light}"
-		+ "@media (prefers-color-scheme:dark){.ob-page{background:#f4f4f5!important}.ob-card{background:#ffffff!important;color:#18181b!important}}"
+		+ "<style>:root{color-scheme:light dark;supported-color-schemes:light dark}"
+		+ "@media (prefers-color-scheme:dark){.ob-page,.ob-hole{background:#121212!important}.ob-card{background:#ffffff!important;color:#18181b!important}}"
 		+ "[data-ogsc] .ob-card,[data-ogsb] .ob-card{background:#ffffff!important;color:#18181b!important}"
-		+ "[data-ogsb] .ob-page{background:#f4f4f5!important}</style>";
+		+ "</style>";
 
 	private WeeklyReportEmail() {
 	}
@@ -95,8 +95,8 @@ public final class WeeklyReportEmail {
 		h.append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
 			.append(HEAD_STYLES)
 			.append("<title>").append(esc(subject(r))).append("</title></head>")
-			.append("<body class=\"ob-page\" style=\"margin:0;padding:0;background:").append(PAGE).append(";color-scheme:light only;\">")
-			.append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:").append(PAGE).append(";\">")
+			.append("<body class=\"ob-page\" style=\"margin:0;padding:0;background:").append(PAGE).append(";\">")
+			.append("<table role=\"presentation\" width=\"100%\" class=\"ob-page\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:").append(PAGE).append(";\">")
 			.append("<tr><td align=\"center\" class=\"page\" style=\"padding:32px 12px;\">")
 			.append("<table role=\"presentation\" width=\"100%\" class=\"ob-card\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"width:100%;max-width:480px;background:#ffffff;border:1px solid ")
 			.append(RULE).append(";border-bottom:0;border-radius:14px 14px 0 0;font-family:").append(FONT).append(";color:").append(INK).append(";\">");
@@ -112,9 +112,9 @@ public final class WeeklyReportEmail {
 
 		// Tear line with its two notches
 		h.append("<tr><td style=\"padding:0;\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>")
-			.append("<td width=\"11\" style=\"width:11px;height:22px;background:").append(PAGE).append(";border-radius:0 11px 11px 0;font-size:0;line-height:0;\">&nbsp;</td>")
+			.append("<td width=\"11\" class=\"ob-hole\" style=\"width:11px;height:22px;background:").append(PAGE).append(";border-radius:0 11px 11px 0;font-size:0;line-height:0;\">&nbsp;</td>")
 			.append("<td style=\"padding:0 8px;\"><div style=\"border-top:1px dashed #d4d4d8;font-size:0;line-height:0;\">&nbsp;</div></td>")
-			.append("<td width=\"11\" style=\"width:11px;height:22px;background:").append(PAGE).append(";border-radius:11px 0 0 11px;font-size:0;line-height:0;\">&nbsp;</td>")
+			.append("<td width=\"11\" class=\"ob-hole\" style=\"width:11px;height:22px;background:").append(PAGE).append(";border-radius:11px 0 0 11px;font-size:0;line-height:0;\">&nbsp;</td>")
 			.append("</tr></table></td></tr>");
 
 		// Net
@@ -238,7 +238,7 @@ public final class WeeklyReportEmail {
 		h.append("<table role=\"presentation\" width=\"100%\" class=\"ob-card\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"width:100%;max-width:480px;background:#ffffff;border-left:1px solid ")
 			.append(RULE).append(";border-right:1px solid ").append(RULE).append(";\"><tr><td colspan=\"20\" style=\"font-size:0;line-height:0;padding:0;height:8px;\">&nbsp;</td></tr><tr>");
 		for (int i = 0; i < 20; i++) {
-			h.append("<td style=\"padding:0;font-size:0;line-height:0;\"><div style=\"height:7px;margin:0 3px;background:").append(PAGE)
+			h.append("<td style=\"padding:0;font-size:0;line-height:0;\"><div class=\"ob-hole\" style=\"height:7px;margin:0 3px;background:").append(PAGE)
 				.append(";border-radius:7px 7px 0 0;\">&nbsp;</div></td>");
 		}
 		h.append("</tr></table></td></tr></table></body></html>");

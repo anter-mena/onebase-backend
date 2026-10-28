@@ -18,5 +18,13 @@
 # A record on this VPS. Elsewhere a local name nobody reaches.
 {$N8N_DOMAIN} {
 	encode zstd gzip
+	# Never in a search engine.
+	header X-Robots-Tag "noindex, nofollow"
+	# A browser password in front of the editor (2026-10-28), from a file kept only on the
+	# server (/opt/onebase/caddy-auth/n8n.caddy, see ACCESS.md). Google's scanner flagged the
+	# site as "dangerous" on seeing n8n's sign-in page, as it does with copies used for
+	# phishing; behind this it never sees it. The webhooks keep their own key and stay open.
+	# No such file (another server): no password, as before.
+	import /etc/caddy/auth/n8n*.caddy
 	reverse_proxy n8n:5678
 }
