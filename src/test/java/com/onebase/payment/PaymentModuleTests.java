@@ -153,7 +153,7 @@ class PaymentModuleTests {
 		// The old JSON way, without files, is gone: a payment always comes with its proof.
 		mvc.perform(post("/api/clients/" + clientId + "/payments").header("Authorization", "Bearer " + commercial)
 				.contentType(MediaType.APPLICATION_JSON).content(payment))
-			.andExpect(status().is4xxClientError());
+			.andExpect(status().isUnsupportedMediaType());
 		// No proof, or one that is not an invoice format: nothing is saved.
 		mvc.perform(multipart("/api/clients/" + clientId + "/payments").file(part).header("Authorization", "Bearer " + commercial))
 			.andExpect(status().isBadRequest())
