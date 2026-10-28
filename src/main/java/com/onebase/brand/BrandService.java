@@ -13,6 +13,9 @@ import com.onebase.user.User;
 import com.onebase.user.UserRepository;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -21,6 +24,7 @@ import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,22 +51,38 @@ public class BrandService {
 	private final UserRepository users;
 	private final ActionLogService actionLog;
 	private final ClientRepository clients;
+	private final ZoneId zone;
 
 	public BrandService(BrandRepository brands, BrandLookup lookup, UserRepository users, ActionLogService actionLog,
-			ClientRepository clients) {
+			ClientRepository clients, @Value("${onebase.timezone:America/Toronto}") String zone) {
 		this.brands = brands;
 		this.lookup = lookup;
 		this.users = users;
 		this.actionLog = actionLog;
 		this.clients = clients;
+		this.zone = ZoneId.of(zone);
 	}
 
 	@Transactional(readOnly = true)
 	public List<BrandResponse> list() {
 		Map<Long, Long> counts = new HashMap<>();
 		for (Object[] row : clients.countByBrand()) counts.put((Long) row[0], (Long) row[1]);
+		// The line beside the count: clients added in each quarter of this year (2026-10-28).
+		LocalDate yearStart = LocalDate.now(zone).withDayOfYear(1);
+		Instant from = yearStart.atStartOfDay(zone).toInstant();
+		Instant to = yearStart.plusYears(1).atStartOfDay(zone).toInstant();
+		Map<Long, long[]> quarters = new HashMap<>();
+		for (Object[] row : clients.countByBrandAndQuarter(zone.getId(), from, to)) {
+			int quarter = ((Number) row[1]).intValue();
+			if (quarter >= 1 && quarter <= 4) {
+				quarters.computeIfAbsent(((Number) row[0]).longValue(), id -> new long[4])[quarter - 1] = ((Number) row[2]).longValue();
+			}
+		}
 		return brands.findAllByOrderByCreatedAtAscIdAsc().stream()
-			.map(brand -> BrandResponse.from(brand, counts.getOrDefault(brand.getId(), 0L)))
+			.map(brand -> {
+				long[] q = quarters.getOrDefault(brand.getId(), new long[4]);
+				return BrandResponse.from(brand, counts.getOrDefault(brand.getId(), 0L), List.of(q[0], q[1], q[2], q[3]));
+			})
 			.toList();
 	}
 

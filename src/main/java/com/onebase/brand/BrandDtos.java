@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 /** What crosses the wire for the Brands tab. */
@@ -25,17 +26,20 @@ public final class BrandDtos {
 			boolean active,
 			/** Clients on this brand, deleted ones left out. */
 			long clients,
+			/** Of those, how many were added in each quarter of this year (Q1–Q4): the Brands table's line. */
+			List<Long> clientsByQuarter,
 			/** The Google Analytics 4 property number, or null. */
 			String ga4PropertyId,
 			Instant createdAt) {
 
 		static BrandResponse from(Brand brand) {
-			return from(brand, 0);
+			return from(brand, 0, List.of(0L, 0L, 0L, 0L));
 		}
 
-		static BrandResponse from(Brand brand, long clients) {
+		static BrandResponse from(Brand brand, long clients, List<Long> clientsByQuarter) {
 			return new BrandResponse(brand.getId(), brand.getName(), brand.getDomain(), brand.getWebsiteUrl(),
-				brand.socials(), brand.logoUrl(), brand.isActive(), clients, brand.getGa4PropertyId(), brand.getCreatedAt());
+				brand.socials(), brand.logoUrl(), brand.isActive(), clients, clientsByQuarter, brand.getGa4PropertyId(),
+				brand.getCreatedAt());
 		}
 	}
 

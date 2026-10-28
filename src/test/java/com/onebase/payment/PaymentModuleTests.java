@@ -187,6 +187,29 @@ class PaymentModuleTests {
 	}
 
 	@Test
+	void aBrandCountsClientsNotPlansAndItsLineAddsUp() throws Exception {
+		String admin = token("pay-brand-count@onebase.test", UserRole.ADMIN);
+		long brandId = brand("Count Brand", "countbrand.test");
+		long method = method("PAYPAL", "Count PayPal");
+		long many = whatsAppClient("212622220010");
+		long once = whatsAppClient("212622220011");
+		// One client with three plans, one with a single plan: two clients.
+		for (int i = 0; i < 3; i++) pay(admin, many, i == 0 ? "NEW_PLAN" : "RENEWAL", 1, 1, "10", brandId, method, null, 0).andExpect(status().isCreated());
+		pay(admin, once, "NEW_PLAN", 1, 1, "10", brandId, method, null, 0).andExpect(status().isCreated());
+
+		String list = mvc.perform(get("/api/brands").header("Authorization", "Bearer " + admin))
+			.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+		assertThat(JsonPath.<java.util.List<Integer>>read(list, "$[?(@.id == " + brandId + ")].clients")).containsExactly(2);
+		java.util.List<Integer> quarters = JsonPath.<java.util.List<java.util.List<Integer>>>read(list,
+			"$[?(@.id == " + brandId + ")].clientsByQuarter").getFirst();
+		assertThat(quarters).hasSize(4);
+		// Both were added this quarter: the line adds up to the count beside it.
+		int thisQuarter = (LocalDate.now(ZoneId.of("America/Toronto")).getMonthValue() - 1) / 3;
+		assertThat(quarters.get(thisQuarter)).isEqualTo(2);
+		assertThat(quarters.stream().mapToInt(Integer::intValue).sum()).isEqualTo(2);
+	}
+
+	@Test
 	void onlyWhatConfigurationOffersCanBeSold() throws Exception {
 		String commercial = token("pay-rules@onebase.test", UserRole.COMMERCIAL);
 		long clientId = whatsAppClient("212622220002");

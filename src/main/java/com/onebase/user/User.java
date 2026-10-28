@@ -71,6 +71,10 @@ public class User {
 	@Column(name = "password_changed_at")
 	private Instant passwordChangedAt;
 
+	/** When they last opened the email Inbox: the sidebar counts brand mail that arrived after it. */
+	@Column(name = "inbox_seen_at")
+	private Instant inboxSeenAt;
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt = Instant.now();
 
@@ -153,4 +157,7 @@ public class User {
 	public Instant getLastActiveAt() { return lastActiveAt; }
 	public void setLastActiveAt(Instant lastActiveAt) { this.lastActiveAt = lastActiveAt; }
 	public Instant getCreatedAt() { return createdAt; }
+	public Instant getInboxSeenAt() { return inboxSeenAt; }
+	/** They opened the Inbox: what arrived until now is no longer new to them. */
+	public void inboxSeen() { this.inboxSeenAt = Instant.now(); }
 }

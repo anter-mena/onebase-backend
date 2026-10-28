@@ -6,6 +6,7 @@ import com.onebase.inbox.InboxDtos.DraftSaved;
 import com.onebase.inbox.InboxDtos.MailDetail;
 import com.onebase.inbox.InboxDtos.MailSummary;
 import com.onebase.inbox.InboxDtos.Overview;
+import com.onebase.security.AuthPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
@@ -13,6 +14,7 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,9 +32,25 @@ import org.springframework.web.multipart.MultipartFile;
 public class InboxController {
 
 	private final InboxService service;
+	private final InboxSeen seen;
 
-	public InboxController(InboxService service) {
+	public InboxController(InboxService service, InboxSeen seen) {
 		this.service = service;
+		this.seen = seen;
+	}
+
+	@GetMapping("/new")
+	@Operation(summary = "Brand emails new to me", description = "For the sidebar: those that arrived since I last opened the Inbox, read or not "
+		+ "(a website form email arrives already read). Before my first visit, the unread ones.")
+	public InboxSeen.NewMail newMail(@AuthenticationPrincipal AuthPrincipal user) {
+		return seen.newMail(user);
+	}
+
+	@PostMapping("/seen")
+	@Operation(summary = "I opened the Inbox", description = "What arrived until now is no longer new to me.")
+	public ResponseEntity<Void> markSeen(@AuthenticationPrincipal AuthPrincipal user) {
+		seen.seen(user);
+		return ResponseEntity.noContent().build();
 	}
 
 	@GetMapping("/overview")

@@ -204,6 +204,20 @@ class InboxUnitTests {
 			.isInstanceOf(ApiException.class).hasMessage("Unknown brand: Personal");
 	}
 
+	@Test
+	void newMailIsWhatArrivedSinceTheLastVisitReadOrNot() {
+		Fixture f = new Fixture();
+		when(f.mailbox.count(FolderKey.INBOX, "{label:EasyIPTV} after:1793145600")).thenReturn(2);
+		// Since the last visit: arrival, not the read flag (a website form email arrives already read).
+		assertThat(f.service.newSince(java.time.Instant.ofEpochSecond(1793145600))).isEqualTo(2);
+		// Before the first visit: the unread brand mail.
+		f.service.newSince(null);
+		verify(f.mailbox).count(FolderKey.INBOX, "is:unread {label:EasyIPTV}");
+		// No brand label: nothing is asked of Gmail.
+		when(f.mailbox.userLabels()).thenReturn(List.of("Personal"));
+		assertThat(f.service.newSince(null)).isZero();
+	}
+
 	// ── Only brand mail ───────────────────────────────────────────────────
 
 	@Test

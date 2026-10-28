@@ -26,6 +26,7 @@ import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -97,6 +98,18 @@ public class InboxService {
 			.map(m -> new BrandView(m.label(), m.brand().logoUrl(), m.sender() == null ? null : m.sender().email()))
 			.toList();
 		return new Overview(new AccountView(settings.username(), settings.displayName()), folders, brandViews, senders(matches));
+	}
+
+	/**
+	 * Brand emails new to someone (2026-10-28): those that reached the Inbox after
+	 * {@code since}, read or not — a website form email is "from" the mailbox itself,
+	 * and Gmail files what you send yourself as already read. Before their first visit
+	 * ({@code since} null), the unread ones.
+	 */
+	public int newSince(Instant since) {
+		String inbox = brandQuery(FolderKey.INBOX, brandMatches());
+		if (inbox == null) return 0;
+		return mailbox.count(FolderKey.INBOX, since == null ? "is:unread " + inbox : inbox + " after:" + since.getEpochSecond());
 	}
 
 	public List<MailSummary> list(String folder, String q, boolean unread, String brand, Integer limit) {
