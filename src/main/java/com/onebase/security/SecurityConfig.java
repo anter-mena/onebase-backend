@@ -99,6 +99,8 @@ public class SecurityConfig {
 					"/api/invitations/accept").permitAll()
 				// Meta's webhook: no account, so it proves itself with a signature (see WhatsAppWebhookController).
 				.requestMatchers("/api/whatsapp/webhook").permitAll()
+				// The weekly report: n8n has no account, it proves itself with the report key (WeeklyReportController).
+				.requestMatchers(HttpMethod.GET, "/api/reports/weekly").permitAll()
 				// Reading the brand list: both roles (Commercials pick a brand for clients and payments).
 				// Adding, editing and switching brands fall through to Admin-only below.
 				.requestMatchers(HttpMethod.GET, "/api/brands").authenticated()

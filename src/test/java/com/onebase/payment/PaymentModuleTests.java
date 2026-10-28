@@ -58,6 +58,7 @@ import org.springframework.test.web.servlet.ResultActions;
 	"onebase.whatsapp.app-secret=test-app-secret",
 	"onebase.whatsapp.verify-token=verify-me",
 	"onebase.timezone=America/Toronto",
+	"onebase.report.key=test-report-key",
 })
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
@@ -207,6 +208,38 @@ class PaymentModuleTests {
 		int thisQuarter = (LocalDate.now(ZoneId.of("America/Toronto")).getMonthValue() - 1) / 3;
 		assertThat(quarters.get(thisQuarter)).isEqualTo(2);
 		assertThat(quarters.stream().mapToInt(Integer::intValue).sum()).isEqualTo(2);
+	}
+
+	@Test
+	void theWeeklyReportNeedsItsKeyAndCountsTheWeek() throws Exception {
+		String admin = token("pay-report@onebase.test", UserRole.ADMIN);
+		long clientId = whatsAppClient("212622220020");
+		long brandId = brand("Report Brand", "reportbrand.test");
+		long method = method("INTERAC", "Report Interac");
+		String today = LocalDate.now(ZoneId.of("America/Toronto")).toString();
+
+		// No key, a wrong key, a signed-in person: refused. It opens with its own key only.
+		mvc.perform(get("/api/reports/weekly")).andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/reports/weekly").header("X-Report-Key", "wrong")).andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/reports/weekly").header("Authorization", "Bearer " + admin)).andExpect(status().isUnauthorized());
+
+		String before = mvc.perform(get("/api/reports/weekly").param("week", today).header("X-Report-Key", "test-report-key"))
+			.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+		pay(admin, clientId, "NEW_PLAN", 1, 1, "25", brandId, method, null, 0).andExpect(status().isCreated());
+		String after = mvc.perform(get("/api/reports/weekly").param("week", today).header("X-Report-Key", "test-report-key"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.subject").value(org.hamcrest.Matchers.startsWith("One Base weekly report")))
+			.andExpect(jsonPath("$.html").value(org.hamcrest.Matchers.containsString("Report Brand")))
+			.andReturn().getResponse().getContentAsString();
+		assertThat(((Number) JsonPath.read(after, "$.report.money.payments")).intValue())
+			.isEqualTo(((Number) JsonPath.read(before, "$.report.money.payments")).intValue() + 1);
+		// A week runs Sunday to Saturday.
+		assertThat(LocalDate.parse(JsonPath.<String>read(after, "$.start")).getDayOfWeek()).isEqualTo(java.time.DayOfWeek.SUNDAY);
+		assertThat(LocalDate.parse(JsonPath.<String>read(after, "$.end")).getDayOfWeek()).isEqualTo(java.time.DayOfWeek.SATURDAY);
+		// The email alone, to look at it.
+		mvc.perform(get("/api/reports/weekly").param("format", "html").header("X-Report-Key", "test-report-key"))
+			.andExpect(status().isOk())
+			.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentTypeCompatibleWith(MediaType.TEXT_HTML));
 	}
 
 	@Test

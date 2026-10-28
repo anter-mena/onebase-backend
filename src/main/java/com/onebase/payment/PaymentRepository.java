@@ -35,6 +35,10 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
 	/** Every payment, newest first (the Dashboard's all-time figures). */
 	List<Payment> findByDeletedAtIsNull();
 
+	/** Clients whose paid time ran out between two days (both included): the weekly report's "ended". */
+	@Query("select p.clientId from Payment p where p.deletedAt is null group by p.clientId having max(p.endsOn) >= :from and max(p.endsOn) <= :to")
+	List<Long> clientsEndedBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
 	/** How many clients had paid time running on a day: the Active count back then. */
 	@Query("select count(distinct p.clientId) from Payment p where p.deletedAt is null and p.startsOn <= :day and p.endsOn > :day")
 	long clientsCoveredOn(@Param("day") LocalDate day);

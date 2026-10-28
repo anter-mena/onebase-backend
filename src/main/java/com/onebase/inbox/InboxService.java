@@ -106,6 +106,13 @@ public class InboxService {
 	 * and Gmail files what you send yourself as already read. Before their first visit
 	 * ({@code since} null), the unread ones.
 	 */
+	/** Brand emails that reached the Inbox in [from, to), read or not: the weekly report's activity. */
+	public int receivedBetween(Instant from, Instant to) {
+		String inbox = brandQuery(FolderKey.INBOX, brandMatches());
+		if (inbox == null) return 0;
+		return mailbox.count(FolderKey.INBOX, inbox + " after:" + from.getEpochSecond() + " before:" + to.getEpochSecond());
+	}
+
 	public int newSince(Instant since) {
 		String inbox = brandQuery(FolderKey.INBOX, brandMatches());
 		if (inbox == null) return 0;

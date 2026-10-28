@@ -8,6 +8,9 @@ import org.springframework.data.repository.query.Param;
 
 public interface ClientRepository extends JpaRepository<Client, Long> {
 
+	/** Clients added in [from, to), deleted ones left out: the weekly report's new clients. */
+	List<Client> findByDeletedAtIsNullAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(java.time.Instant from, java.time.Instant to);
+
 	/** How many clients are in a status (deleted ones left out): the Clients notification counts New. */
 	long countByStatusAndDeletedAtIsNull(Client.Status status);
 

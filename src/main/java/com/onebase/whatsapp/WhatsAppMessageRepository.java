@@ -16,6 +16,11 @@ public interface WhatsAppMessageRepository extends JpaRepository<WhatsAppMessage
 
 	List<WhatsAppMessage> findByConversationIdOrderByCreatedAtAscIdAsc(long conversationId);
 
+	/** Messages received in [from, to), and from how many conversations: [count, conversations]. */
+	@Query("select count(m), count(distinct m.conversationId) from WhatsAppMessage m"
+		+ " where m.direction = com.onebase.whatsapp.WhatsAppMessage.Direction.IN and m.createdAt >= :from and m.createdAt < :to")
+	List<Object[]> receivedBetween(@Param("from") java.time.Instant from, @Param("to") java.time.Instant to);
+
 	Optional<WhatsAppMessage> findFirstByConversationIdAndDirectionOrderByCreatedAtDescIdDesc(long conversationId,
 			WhatsAppMessage.Direction direction);
 
