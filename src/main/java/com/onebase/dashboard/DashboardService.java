@@ -43,7 +43,7 @@ import org.springframework.transaction.annotation.Transactional;
  * The Dashboard, worked out from the payments (built 2026-10-06). Admins only.
  *
  * <p><b>One period scopes the page</b> — the SEO page's filter: today, yesterday,
- * 7 days, this month, this year, or custom; the comparison is the same length just
+ * this week, this month, this year, or custom; the comparison is the same length just
  * before. "Total" and the clients counts are all-time; the monthly target is
  * always the current month. USD, business time zone.
  */

@@ -59,7 +59,10 @@ class SeoServiceTests {
 		when(ga4.batch(eq("412305881"), anyList())).thenReturn(first, second);
 
 		SeoService service = new SeoService(ga4, brands, "UTC");
-		SeoService.Overview o = service.overview(3, "7d", null, null);
+		// Seven whole days ending yesterday, whatever day this runs: "this week" grows through the week.
+		String from = LocalDate.now(ZoneOffset.UTC).minusDays(7).toString();
+		String to = LocalDate.now(ZoneOffset.UTC).minusDays(1).toString();
+		SeoService.Overview o = service.overview(3, "custom", from, to);
 
 		assertThat(o.traffic()).hasSize(7);
 		assertThat(o.traffic().get(6).sessions()).isEqualTo(40);
@@ -84,7 +87,7 @@ class SeoServiceTests {
 		assertThat(o.countries()).extracting(SeoService.Country::organicSessions).containsExactly(0L, 60L);
 
 		// Kept ten minutes: a second look asks Google nothing.
-		service.overview(3, "7d", null, null);
+		service.overview(3, "custom", from, to);
 		verify(ga4, times(2)).batch(eq("412305881"), anyList());
 	}
 
@@ -105,10 +108,22 @@ class SeoServiceTests {
 		assertThat(day.previousStart()).isEqualTo(LocalDate.of(2026, 10, 4));
 		SeoPeriod yesterday = SeoPeriod.of("yesterday", null, null, today);
 		assertThat(yesterday.start()).isEqualTo(LocalDate.of(2026, 10, 4));
-		SeoPeriod week = SeoPeriod.of("7d", null, null, today);
-		assertThat(week.start()).isEqualTo(LocalDate.of(2026, 9, 28));
-		assertThat(week.end()).isEqualTo(LocalDate.of(2026, 10, 4));
-		assertThat(week.previousStart()).isEqualTo(LocalDate.of(2026, 9, 21));
+		// This week: Monday to today, against the same days of last week. 5 Oct 2026 is a Monday.
+		SeoPeriod monday = SeoPeriod.of("week", null, null, today);
+		assertThat(monday.start()).isEqualTo(today);
+		assertThat(monday.end()).isEqualTo(today);
+		assertThat(monday.step()).isEqualTo(SeoPeriod.Step.HOUR);
+		SeoPeriod week = SeoPeriod.of("week", null, null, LocalDate.of(2026, 10, 7));
+		assertThat(week.start()).isEqualTo(LocalDate.of(2026, 10, 5));
+		assertThat(week.end()).isEqualTo(LocalDate.of(2026, 10, 7));
+		assertThat(week.previousStart()).isEqualTo(LocalDate.of(2026, 9, 28));
+		assertThat(week.previousEnd()).isEqualTo(LocalDate.of(2026, 9, 30));
+		assertThat(week.step()).isEqualTo(SeoPeriod.Step.DAY);
+		SeoPeriod sunday = SeoPeriod.of("week", null, null, LocalDate.of(2026, 10, 11));
+		assertThat(sunday.start()).isEqualTo(LocalDate.of(2026, 10, 5));
+		assertThat(sunday.days()).isEqualTo(7);
+		// The old name still works, as this week.
+		assertThat(SeoPeriod.of("7d", null, null, today).range()).isEqualTo("week");
 		SeoPeriod month = SeoPeriod.of("month", null, null, today);
 		assertThat(month.start()).isEqualTo(LocalDate.of(2026, 10, 1));
 		assertThat(month.previousEnd()).isEqualTo(LocalDate.of(2026, 9, 30));

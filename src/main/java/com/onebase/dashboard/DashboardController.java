@@ -31,7 +31,7 @@ public class DashboardController {
 	}
 
 	@GetMapping
-	@Operation(summary = "Everything the Dashboard draws", description = "range: today, yesterday, 7d, month, year, custom (with from and to).")
+	@Operation(summary = "Everything the Dashboard draws", description = "range: today, yesterday, week, month, year, custom (with from and to).")
 	public Overview overview(@RequestParam(required = false) String range, @RequestParam(required = false) String from,
 			@RequestParam(required = false) String to) {
 		return service.overview(range, from, to);

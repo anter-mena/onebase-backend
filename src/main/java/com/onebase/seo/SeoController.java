@@ -28,8 +28,8 @@ public class SeoController {
 
 	@GetMapping("/overview")
 	@Operation(summary = "Organic search for one brand",
-		description = "range: today, yesterday, 7d, month (this month), year (this year) or custom with from/to (YYYY-MM-DD). Compared with the period of the same length just before.")
-	public SeoService.Overview overview(@RequestParam long brandId, @RequestParam(defaultValue = "7d") String range,
+		description = "range: today, yesterday, week (Monday to today), month (this month), year (this year) or custom with from/to (YYYY-MM-DD). Compared with the period of the same length just before; this week with the same days of last week.")
+	public SeoService.Overview overview(@RequestParam long brandId, @RequestParam(defaultValue = "week") String range,
 			@RequestParam(required = false) String from, @RequestParam(required = false) String to) {
 		return service.overview(brandId, range, from, to);
 	}

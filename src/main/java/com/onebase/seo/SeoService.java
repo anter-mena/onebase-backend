@@ -71,7 +71,7 @@ public class SeoService {
 	}
 
 	/**
-	 * {@code range}: today, yesterday, 7d, month, year or custom; {@code start}/{@code end} the dates
+	 * {@code range}: today, yesterday, week, month, year or custom; {@code start}/{@code end} the dates
 	 * it covers; {@code step} the chart's step (HOUR, DAY, WEEK, MONTH).
 	 */
 	public record Overview(SeoBrand brand, String range, String start, String end, String step, Instant fetchedAt,
