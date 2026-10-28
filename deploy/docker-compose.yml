@@ -158,6 +158,16 @@ services:
       # Runs are kept two weeks, then pruned, so its database does not grow forever.
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=336
+    # Names outside this server (smtp.gmail.com…) failed about 1 lookup in 7 ("EAI_AGAIN")
+    # through the host's DNS, measured 2026-10-28: musl, n8n's system library, gives up
+    # where the backend's retries. Public resolvers cut it to about 1 in 30, and there is
+    # no IPv6 route here, so none is asked for. The report itself is fetched as
+    # http://backend:8080 (Docker's own names: 60/60), and every step retries.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
     volumes:
       - n8n_data:/home/node/.n8n
     depends_on:
