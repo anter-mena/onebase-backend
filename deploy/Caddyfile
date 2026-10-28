@@ -13,3 +13,10 @@
 	encode zstd gzip
 	reverse_proxy backend:8080
 }
+
+# n8n (2026-10-28) where site.env turns it on: N8N_DOMAIN=n8n.onebase.live, with its DNS
+# A record on this VPS. Elsewhere a local name nobody reaches.
+{$N8N_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy n8n:5678
+}
