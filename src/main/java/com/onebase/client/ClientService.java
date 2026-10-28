@@ -39,9 +39,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The Clients module: the list, one client, edit, the note, delete — and the
- * client WhatsApp makes when an unknown number writes, which is the only way a
- * client is made (decided 2026-10-06: no Add client).
+ * The Clients module: the list, one client, add, edit, the note, delete — and the
+ * client WhatsApp makes when an unknown number writes. Clients came only from
+ * WhatsApp until 2026-10-28; Add client is back since, with the same rules as an edit.
  *
  * <p><b>One client per number.</b> The phone is stored as E.164 and is unique,
  * deleted clients included: a deleted client who writes again comes back rather
@@ -57,6 +57,7 @@ public class ClientService {
 	private static final Logger log = LoggerFactory.getLogger(ClientService.class);
 	static final String NEEDS_NAME = "Enter the client's full name.";
 	static final String NEEDS_CONTACT = "Enter a phone number or an email address.";
+	static final String NEEDS_PHONE = "Enter the client's phone number, with the country code.";
 
 	private final ClientRepository clients;
 	private final BrandRepository brands;
@@ -126,6 +127,37 @@ public class ClientService {
 		actionLog.record(actor(principal), Action.UPDATED, TargetType.CLIENT, client.getId(), client.displayName(),
 			"Changed " + String.join(", ", changed));
 		return get(id);
+	}
+
+	/** What a client may start as when added by hand; the rest follow from messages, trials and payments. */
+	static final java.util.Set<Status> CREATABLE = java.util.EnumSet.of(Status.NEW, Status.TRIAL, Status.PENDING);
+
+	/**
+	 * Add client (2026-10-28). Checked here before anything is saved, so a refusal
+	 * changes nothing: a phone number — the one thing required, since it is who the
+	 * client is (one client per number) and how WhatsApp finds them; the name and the
+	 * email may come later — that no other client has (deleted ones included, the
+	 * answer names them), a brand that is switched on, a status a person may choose.
+	 * If the number already writes on WhatsApp, its conversation becomes theirs.
+	 */
+	@Transactional
+	public ClientResponse create(AuthPrincipal principal, ClientDtos.CreateClientRequest request) {
+		String phone = PhoneNumbers.normalize(request.phone());
+		if (phone == null) throw ApiException.badRequest(NEEDS_PHONE);
+		if (!CREATABLE.contains(request.status())) {
+			throw ApiException.badRequest(label(request.status()) + " is set by One Base: start them as New, Trial or Pending.");
+		}
+		refuseTaken(phone, null);
+		Long brandId = usableBrand(request.brandId(), null);
+		User actor = actor(principal);
+
+		Client client = save(Client.manual(request.fullName(), request.email(), phone,
+			PhoneNumbers.country(phone), brandId, request.status(), request.note(), actor.getId()));
+		linkConversation(client);
+		actionLog.record(actor, Action.CREATED, TargetType.CLIENT, client.getId(), client.displayName(),
+			"Added the client by hand" + (request.status() == Status.NEW ? "" : ", as " + label(request.status())));
+		log.info("User id={} added client id={} by hand", principal.userId(), client.getId());
+		return get(client.getId());
 	}
 
 	@Transactional

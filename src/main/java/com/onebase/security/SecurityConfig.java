@@ -61,6 +61,8 @@ public class SecurityConfig {
 		"/api/renewals/**",
 		"/api/whatsapp/**",
 		"/api/inbox/**",
+		// The sidebar's counts for the four areas above.
+		"/api/notifications/**",
 	};
 
 	private final ObjectMapper objectMapper;

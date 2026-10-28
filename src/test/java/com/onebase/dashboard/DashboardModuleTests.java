@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.jayway.jsonpath.JsonPath;
 import com.onebase.TestcontainersConfiguration;
 import com.onebase.mail.MailService;
+import com.onebase.payment.PaymentRequests;
 import com.onebase.user.User;
 import com.onebase.user.UserRepository;
 import com.onebase.user.UserRole;
@@ -132,10 +133,9 @@ class DashboardModuleTests {
 		long perk = jdbc.queryForObject("insert into perks (name, cost) values ('Cash Perk', 3.25) returning id", Long.class);
 		long client = whatsAppClient("212633330002");
 		// A sale: its plan's cost is not money out (the credit was paid by a top-up); its perk is.
-		mvc.perform(post("/api/clients/" + client + "/payments").header("Authorization", "Bearer " + admin)
-				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"kind\":\"NEW_PLAN\",\"devices\":1,\"months\":1,\"amount\":50,\"brandId\":" + brand
-					+ ",\"paymentMethodId\":" + card + ",\"perks\":[{\"perkId\":" + perk + ",\"quantity\":2}]}"))
+		mvc.perform(PaymentRequests.addPayment(client, "{\"kind\":\"NEW_PLAN\",\"devices\":1,\"months\":1,\"amount\":50,\"brandId\":" + brand
+					+ ",\"paymentMethodId\":" + card + ",\"perks\":[{\"perkId\":" + perk + ",\"quantity\":2}]}")
+				.header("Authorization", "Bearer " + admin))
 			.andExpect(status().isCreated());
 		// A top-up: money out today.
 		mvc.perform(post("/api/credit/topups").header("Authorization", "Bearer " + admin).contentType(MediaType.APPLICATION_JSON)
@@ -186,10 +186,9 @@ class DashboardModuleTests {
 	}
 
 	private void pay(String token, long clientId, String kind, String amount, long brand, long method) throws Exception {
-		mvc.perform(post("/api/clients/" + clientId + "/payments").header("Authorization", "Bearer " + token)
-				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"kind\":\"" + kind + "\",\"devices\":1,\"months\":1,\"amount\":" + amount + ",\"brandId\":" + brand
-					+ ",\"paymentMethodId\":" + method + ",\"perks\":[]}"))
+		mvc.perform(PaymentRequests.addPayment(clientId, "{\"kind\":\"" + kind + "\",\"devices\":1,\"months\":1,\"amount\":" + amount + ",\"brandId\":" + brand
+					+ ",\"paymentMethodId\":" + method + ",\"perks\":[]}")
+				.header("Authorization", "Bearer " + token))
 			.andExpect(status().isCreated());
 	}
 

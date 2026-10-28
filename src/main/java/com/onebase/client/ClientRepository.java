@@ -7,6 +7,9 @@ import org.springframework.data.jpa.repository.Query;
 
 public interface ClientRepository extends JpaRepository<Client, Long> {
 
+	/** How many clients are in a status (deleted ones left out): the Clients notification counts New. */
+	long countByStatusAndDeletedAtIsNull(Client.Status status);
+
 	/** The Clients table: everyone not deleted, newest first. */
 	List<Client> findByDeletedAtIsNullOrderByCreatedAtDescIdDesc();
 

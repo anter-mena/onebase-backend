@@ -13,6 +13,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -40,6 +41,16 @@ public class ClientController {
 	@Operation(summary = "Every client, newest first", description = "Deleted clients are left out.")
 	public List<ClientResponse> list() {
 		return service.list();
+	}
+
+	@PostMapping
+	@Operation(summary = "Add a client by hand",
+		description = "Who they are and how to reach them; no plan or payment. One client per number (deleted ones too). "
+			+ "Status New when left out; Trial and Pending may be chosen. Logged.")
+	public ResponseEntity<ClientResponse> create(@AuthenticationPrincipal AuthPrincipal user,
+			@Valid @RequestBody ClientDtos.CreateClientRequest request) {
+		ClientResponse created = service.create(user, request);
+		return ResponseEntity.created(java.net.URI.create("/api/clients/" + created.id())).body(created);
 	}
 
 	@GetMapping("/{id}")

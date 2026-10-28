@@ -138,7 +138,9 @@ public class SeoService {
 			report(List.of("sessionDefaultChannelGroup"), List.of("sessions", "totalUsers"), List.of(current, previous), ORGANIC_AND_DIRECT, null, null),
 			report(List.of("landingPage"), List.of("sessions", "engagementRate", "keyEvents"), only(current), ALL, "sessions", 5)));
 		List<JsonNode> second = ga4.batch(property, List.of(
-			report(List.of("sessionDefaultChannelGroup"), List.of("sessions"), only(current), ALL, "sessions", 8),
+			// Every channel, not the top eight (2026-10-28): the page shows a fixed list and adds
+			// the rest up as "Other", which only adds up to 100% if none is cut off. GA4 has ~19.
+			report(List.of("sessionDefaultChannelGroup"), List.of("sessions"), only(current), ALL, "sessions", 25),
 			report(List.of("sessionSource"), List.of("sessions"), only(current), ORGANIC, "sessions", 5),
 			report(List.of("countryId", "country"), List.of("sessions"), only(current), ALL, "sessions", 10),
 			report(List.of("countryId"), List.of("sessions"), only(current), ORGANIC, "sessions", 250),

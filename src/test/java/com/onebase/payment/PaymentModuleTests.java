@@ -3,6 +3,7 @@ package com.onebase.payment;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -34,6 +35,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -137,6 +139,54 @@ class PaymentModuleTests {
 	}
 
 	@Test
+	void aPaymentFromTheWindowIsSavedWithItsProofOrNotAtAll() throws Exception {
+		String commercial = token("pay-proof@onebase.test", UserRole.COMMERCIAL);
+		long clientId = whatsAppClient("212622220003");
+		long brandId = brand("Proof Brand", "proofbrand.test");
+		long method = method("BINANCE", "Proof Binance");
+		String payment = "{\"kind\":\"NEW_PLAN\",\"devices\":1,\"months\":1,\"amount\":10,\"brandId\":" + brandId
+			+ ",\"paymentMethodId\":" + method + ",\"perks\":[]}";
+		MockMultipartFile part = new MockMultipartFile("payment", "", MediaType.APPLICATION_JSON_VALUE, payment.getBytes(StandardCharsets.UTF_8));
+		MockMultipartFile pdf = new MockMultipartFile("proofs", "invoice.pdf", "application/pdf", "%PDF-1.7 proof".getBytes(StandardCharsets.UTF_8));
+		MockMultipartFile page = new MockMultipartFile("proofs", "invoice.html", "text/html", "<html>".getBytes(StandardCharsets.UTF_8));
+
+		// The old JSON way, without files, is gone: a payment always comes with its proof.
+		mvc.perform(post("/api/clients/" + clientId + "/payments").header("Authorization", "Bearer " + commercial)
+				.contentType(MediaType.APPLICATION_JSON).content(payment))
+			.andExpect(status().is4xxClientError());
+		// No proof, or one that is not an invoice format: nothing is saved.
+		mvc.perform(multipart("/api/clients/" + clientId + "/payments").file(part).header("Authorization", "Bearer " + commercial))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.startsWith("Add the proof of payment")));
+		mvc.perform(multipart("/api/clients/" + clientId + "/payments").file(part).file(pdf).file(page).header("Authorization", "Bearer " + commercial))
+			.andExpect(status().isBadRequest());
+		assertThat(jdbc.queryForObject("select count(*) from payments where client_id = ?", Long.class, clientId)).isZero();
+
+		// With a PDF: the payment, and its proof beside it, typed from the bytes.
+		String body = mvc.perform(multipart("/api/clients/" + clientId + "/payments").file(part).file(pdf).header("Authorization", "Bearer " + commercial))
+			.andExpect(status().isCreated())
+			.andReturn().getResponse().getContentAsString();
+		long paymentId = ((Number) JsonPath.read(body, "$.payment.id")).longValue();
+		assertThat(jdbc.queryForObject("select mime from payment_proofs where payment_id = ?", String.class, paymentId)).isEqualTo("application/pdf");
+
+		// Listed with the payment (names, not bytes), and served as exactly what it is.
+		long proofId = jdbc.queryForObject("select id from payment_proofs where payment_id = ?", Long.class, paymentId);
+		mvc.perform(get("/api/clients/" + clientId + "/payments").header("Authorization", "Bearer " + commercial))
+			.andExpect(jsonPath("$[0].proofs[0].filename").value("invoice.pdf"))
+			.andExpect(jsonPath("$[0].proofs[0].mime").value("application/pdf"));
+		String proofUrl = "/api/clients/" + clientId + "/payments/" + paymentId + "/proofs/" + proofId;
+		mvc.perform(get(proofUrl).header("Authorization", "Bearer " + commercial))
+			.andExpect(status().isOk())
+			.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Content-Type", "application/pdf"))
+			.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("X-Content-Type-Options", "nosniff"))
+			.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string("%PDF-1.7 proof"));
+		// Only through its own client and payment.
+		long otherClient = whatsAppClient("212622220004");
+		mvc.perform(get("/api/clients/" + otherClient + "/payments/" + paymentId + "/proofs/" + proofId).header("Authorization", "Bearer " + commercial))
+			.andExpect(status().isNotFound());
+	}
+
+	@Test
 	void onlyWhatConfigurationOffersCanBeSold() throws Exception {
 		String commercial = token("pay-rules@onebase.test", UserRole.COMMERCIAL);
 		long clientId = whatsAppClient("212622220002");
@@ -182,10 +232,9 @@ class PaymentModuleTests {
 	private ResultActions pay(String token, long clientId, String kind, int devices, int months, String amount, long brandId,
 			long methodId, Long perkId, int perkCount) throws Exception {
 		String perksJson = perkId == null ? "[]" : "[{\"perkId\":" + perkId + ",\"quantity\":" + perkCount + "}]";
-		return mvc.perform(post("/api/clients/" + clientId + "/payments").header("Authorization", "Bearer " + token)
-			.contentType(MediaType.APPLICATION_JSON)
-			.content("{\"kind\":\"" + kind + "\",\"devices\":" + devices + ",\"months\":" + months + ",\"amount\":" + amount
-				+ ",\"brandId\":" + brandId + ",\"paymentMethodId\":" + methodId + ",\"perks\":" + perksJson + "}"));
+		return mvc.perform(PaymentRequests.addPayment(clientId, "{\"kind\":\"" + kind + "\",\"devices\":" + devices + ",\"months\":" + months + ",\"amount\":" + amount
+				+ ",\"brandId\":" + brandId + ",\"paymentMethodId\":" + methodId + ",\"perks\":" + perksJson + "}")
+			.header("Authorization", "Bearer " + token));
 	}
 
 	private long usedCredits(String adminToken) throws Exception {

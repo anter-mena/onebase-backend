@@ -83,6 +83,9 @@ public class GoogleServiceAccount {
 			.compact();
 		String form = "grant_type=" + URLEncoder.encode("urn:ietf:params:oauth:grant-type:jwt-bearer", StandardCharsets.UTF_8)
 			+ "&assertion=" + URLEncoder.encode(assertion, StandardCharsets.UTF_8);
+		// Two tries when the connection fails, as in Ga4Client: an idle connection to
+		// Google is closed without warning, and the next call finds out (2026-10-28).
+		for (int attempt = 1; ; attempt++) {
 		try {
 			HttpResponse<String> response = http.send(HttpRequest.newBuilder(URI.create(tokenUri))
 					.timeout(Duration.ofSeconds(20))
@@ -100,10 +103,14 @@ public class GoogleServiceAccount {
 			tokenExpiresAt = now.plusSeconds(body.path("expires_in").asLong(3600));
 			return token;
 		} catch (IOException e) {
-			throw new ApiException(HttpStatus.BAD_GATEWAY, "Google did not answer. Please try again in a moment.");
+			log.warn("Google sign-in for Analytics failed (attempt {}): {}", attempt, e.toString());
+			if (attempt >= 2) {
+				throw new ApiException(HttpStatus.BAD_GATEWAY, "Google did not answer. Please try again in a moment.");
+			}
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			throw new ApiException(HttpStatus.BAD_GATEWAY, "Google did not answer. Please try again in a moment.");
+		}
 		}
 	}
 

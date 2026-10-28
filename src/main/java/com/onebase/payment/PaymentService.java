@@ -17,6 +17,8 @@ import com.onebase.payment.PaymentDtos.CreatedPayment;
 import com.onebase.payment.PaymentDtos.PaymentResponse;
 import com.onebase.payment.PaymentDtos.PerkChoice;
 import com.onebase.payment.PaymentDtos.PerkLineResponse;
+import com.onebase.payment.PaymentDtos.ProofFile;
+import com.onebase.payment.PaymentDtos.ProofResponse;
 import com.onebase.paymentmethod.PaymentMethod;
 import com.onebase.paymentmethod.PaymentMethodRepository;
 import com.onebase.perk.Perk;
@@ -41,6 +43,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * A client's payments: the list, add, and delete (Admins).
@@ -59,6 +62,10 @@ import org.springframework.transaction.annotation.Transactional;
  * balance below zero the payment is still saved — the client has paid — and the
  * answer carries a warning.
  *
+ * <p><b>Proof</b> (2026-10-28, required): a payment is added with its proof files —
+ * an invoice, a screenshot, a receipt email ({@link ProofRules}) — checked before
+ * anything is saved, and saved with the payment, so neither exists without the other.
+ *
  * <p><b>Delete</b> is soft, logged, and Admin-only (SecurityConfig): the payment
  * leaves every total, its credits come back, and the client's dates are worked
  * out again from what remains.
@@ -70,6 +77,7 @@ public class PaymentService {
 	static final BigDecimal MAX_AMOUNT = new BigDecimal("100000");
 
 	private final PaymentRepository payments;
+	private final PaymentProofRepository proofs;
 	private final ClientRepository clients;
 	private final PlanRepository plans;
 	private final PerkRepository perks;
@@ -80,10 +88,11 @@ public class PaymentService {
 	private final ActionLogService actionLog;
 	private final ZoneId zone;
 
-	public PaymentService(PaymentRepository payments, ClientRepository clients, PlanRepository plans, PerkRepository perks,
+	public PaymentService(PaymentRepository payments, PaymentProofRepository proofs, ClientRepository clients, PlanRepository plans, PerkRepository perks,
 			BrandRepository brands, PaymentMethodRepository methods, CreditTopupRepository topups, UserRepository users,
 			ActionLogService actionLog, @Value("${onebase.timezone:America/Toronto}") String zone) {
 		this.payments = payments;
+		this.proofs = proofs;
 		this.clients = clients;
 		this.plans = plans;
 		this.perks = perks;
@@ -101,8 +110,11 @@ public class PaymentService {
 		return views(payments.findByClientIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(clientId));
 	}
 
+	/** Always with its proof: the files are checked first, and saved with the payment or not at all. */
 	@Transactional
-	public CreatedPayment create(AuthPrincipal principal, long clientId, CreatePaymentRequest request) {
+	public CreatedPayment createWithProof(AuthPrincipal principal, long clientId, CreatePaymentRequest request,
+			List<MultipartFile> files) {
+		List<ProofRules.Checked> proofFiles = ProofRules.check(files);
 		Client client = findClient(clientId);
 		Plan plan = plans.findByDevicesAndMonths(request.devices().shortValue(), request.months().shortValue())
 			.orElseThrow(() -> ApiException.badRequest("This plan doesn't exist: choose one from the list."));
@@ -123,6 +135,7 @@ public class PaymentService {
 		Payment payment = payments.saveAndFlush(new Payment(client.getId(), brand.getId(), method.getId(), request.kind(),
 			plan.getDevices(), plan.getMonths(), plan.getPrice(), amount, plan.getCost(), perkLines, credits, startsOn,
 			endsOn, actor.getId()));
+		proofFiles.forEach(file -> proofs.save(new PaymentProof(payment.getId(), file)));
 		client.paid(brand.getId());
 		clients.save(client);
 
@@ -130,7 +143,8 @@ public class PaymentService {
 			+ (plan.getDevices() == 1 ? " device" : " devices");
 		actionLog.record(actor, Action.CREATED, TargetType.PAYMENT, payment.getId(), client.displayName(),
 			"Added a payment of $" + amount.toPlainString() + " (" + planText + ", " + method.getName() + ")"
-				+ (amount.compareTo(plan.getPrice()) == 0 ? "" : " — private price, list price $" + plan.getPrice().toPlainString()));
+				+ (amount.compareTo(plan.getPrice()) == 0 ? "" : " — private price, list price $" + plan.getPrice().toPlainString())
+				+ ", with " + proofFiles.size() + (proofFiles.size() == 1 ? " proof file" : " proof files"));
 		log.info("User id={} added payment id={} for client id={}", principal.userId(), payment.getId(), client.getId());
 
 		long remaining = topups.totalCredits() - payments.totalCreditsUsed();
@@ -138,6 +152,16 @@ public class PaymentService {
 			? "Saved — but the panel credit is now at " + remaining + ". Top it up in Configuration → Expenses."
 			: null;
 		return new CreatedPayment(views(List.of(payment)).getFirst(), warning);
+	}
+
+	/** One proof file, only through its own client and payment (a payment that was deleted has none to show). */
+	@Transactional(readOnly = true)
+	public ProofFile proof(long clientId, long paymentId, long proofId) {
+		Payment payment = payments.findById(paymentId).filter(p -> !p.isDeleted() && p.getClientId() == clientId)
+			.orElseThrow(() -> ApiException.notFound("This payment does not exist."));
+		PaymentProof proof = proofs.findById(proofId).filter(p -> p.getPaymentId().equals(payment.getId()))
+			.orElseThrow(() -> ApiException.notFound("This proof does not exist."));
+		return new ProofFile(proof.getData(), proof.getMime(), proof.getFilename());
 	}
 
 	@Transactional
@@ -204,6 +228,10 @@ public class PaymentService {
 			.stream().collect(Collectors.toMap(Brand::getId, Function.identity()));
 		Map<Long, PaymentMethod> methodsById = methods.findAllById(rows.stream().map(Payment::getPaymentMethodId).distinct().toList())
 			.stream().collect(Collectors.toMap(PaymentMethod::getId, Function.identity()));
+		Map<Long, List<ProofResponse>> proofsByPayment = rows.isEmpty() ? Map.of()
+			: proofs.findByPaymentIdInOrderByIdAsc(rows.stream().map(Payment::getId).toList()).stream()
+				.collect(Collectors.groupingBy(PaymentProofRepository.Info::getPaymentId,
+					Collectors.mapping(p -> new ProofResponse(p.getId(), p.getFilename(), p.getMime(), p.getSizeBytes()), Collectors.toList())));
 		return rows.stream().map(p -> {
 			Brand brand = brandsById.get(p.getBrandId());
 			PaymentMethod method = methodsById.get(p.getPaymentMethodId());
@@ -213,7 +241,7 @@ public class PaymentService {
 				brand == null ? null : brand.logoUrl(), p.getPaymentMethodId(),
 				method == null ? null : method.getProvider().name(), method == null ? null : method.getName(),
 				p.getPerks().stream().map(l -> new PerkLineResponse(l.perkId(), l.name(), l.quantity(), l.unitCost())).toList(),
-				p.getCreatedAt());
+				proofsByPayment.getOrDefault(p.getId(), List.of()), p.getCreatedAt());
 		}).toList();
 	}
 

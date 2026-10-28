@@ -104,13 +104,63 @@ class ClientModuleTests {
 	}
 
 	@Test
-	void theTeamCompletesClientsButCannotAddThemOnePerNumber() throws Exception {
-		String commercial = token("cl-commercial@onebase.test", UserRole.COMMERCIAL);
+	void theTeamAddsClientsByHandSafelyOnePerNumber() throws Exception {
+		String commercial = token("cl-add@onebase.test", UserRole.COMMERCIAL);
+		String auth = "Bearer " + commercial;
 
-		// No Add client: only WhatsApp makes clients.
-		mvc.perform(post("/api/clients").header("Authorization", "Bearer " + commercial).contentType(MediaType.APPLICATION_JSON)
-				.content("{\"fullName\":\"Sara Amrani\",\"phone\":\"+212612345679\",\"status\":\"NEW\"}"))
-			.andExpect(status().isMethodNotAllowed());
+		// Added by hand: tidied, the country from the number, Manual, New by default, logged.
+		String body = mvc.perform(post("/api/clients").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"fullName\":\"  Lina   Haddad \",\"email\":\"Lina@Example.com\",\"phone\":\"+212 6 11 11 00 20\",\"note\":\" Met at the shop \"}"))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.name").value("Lina Haddad"))
+			.andExpect(jsonPath("$.email").value("lina@example.com"))
+			.andExpect(jsonPath("$.phone").value("+212611110020"))
+			.andExpect(jsonPath("$.country").value("MA"))
+			.andExpect(jsonPath("$.status").value("NEW"))
+			.andExpect(jsonPath("$.source").value("MANUAL"))
+			.andExpect(jsonPath("$.note").value("Met at the shop"))
+			.andReturn().getResponse().getContentAsString();
+		long added = ((Number) JsonPath.read(body, "$.id")).longValue();
+		assertThat(logs.findAll()).anyMatch(l -> Long.valueOf(added).equals(l.getTargetId()) && "Added the client by hand".equals(l.getDetail()));
+
+		// The phone alone is enough: called by their number until a name is typed.
+		mvc.perform(post("/api/clients").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"phone\":\"+212611110021\"}"))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.name").value("+212611110021"));
+
+		// Every refusal changes nothing: no phone, one without its country code, a status One Base sets, a taken number.
+		long before = clients.count();
+		mvc.perform(post("/api/clients").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"fullName\":\"No Phone\",\"email\":\"no.phone@example.com\"}"))
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.message").value(ClientService.NEEDS_PHONE));
+		mvc.perform(post("/api/clients").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"fullName\":\"Local Number\",\"phone\":\"0612345600\"}"))
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.message").value(PhoneNumbers.NEEDS_COUNTRY_CODE));
+		mvc.perform(post("/api/clients").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"fullName\":\"Too Soon\",\"phone\":\"+212611110022\",\"status\":\"ACTIVE\"}"))
+			.andExpect(status().isBadRequest());
+		mvc.perform(post("/api/clients").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"fullName\":\"Same Number\",\"phone\":\"00212611110020\"}"))
+			.andExpect(status().isConflict());
+		assertThat(clients.count()).isEqualTo(before);
+
+		// A number that already writes on WhatsApp: the conversation becomes theirs.
+		mvc.perform(post("/api/clients").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"fullName\":\"Omar Tazi\",\"phone\":\"+212611110023\",\"status\":\"TRIAL\"}"))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.status").value("TRIAL"));
+		webhook(inbound("212611110024", "Yasmine", "wamid.A1", "Hi"));
+		long wrote = clients.findByPhone("+212611110024").orElseThrow().getId();
+		mvc.perform(post("/api/clients").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"fullName\":\"Yasmine\",\"phone\":\"+212611110024\"}"))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("#" + wrote)));
+	}
+
+	@Test
+	void theTeamCompletesClientsOnePerNumber() throws Exception {
+		String commercial = token("cl-commercial@onebase.test", UserRole.COMMERCIAL);
 
 		webhook(inbound("212611110004", "Sara", "wamid.E1", "Hi"));
 		webhook(inbound("212611110005", "Other", "wamid.E2", "Hi"));
@@ -196,6 +246,27 @@ class ClientModuleTests {
 
 		webhook(inbound("212611110002", "Nora", "wamid.D2", "Me again"));
 		mvc.perform(get("/api/clients/" + id).header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
+	}
+
+	@Test
+	void theSidebarCountsWhatIsWaitingForBothRoles() throws Exception {
+		String commercial = token("notify-commercial@onebase.test", UserRole.COMMERCIAL);
+		String before = mvc.perform(get("/api/notifications").header("Authorization", "Bearer " + commercial))
+			.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+		// Someone new writes: one more New client, one more unread message.
+		webhook(inbound("212611110099", "Notify", "wamid.N1", "Hello"));
+		String after = mvc.perform(get("/api/notifications").header("Authorization", "Bearer " + commercial))
+			.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+		assertThat(count(after, "clients")).isEqualTo(count(before, "clients") + 1);
+		assertThat(count(after, "whatsapp")).isEqualTo(count(before, "whatsapp") + 1);
+		assertThat(count(after, "renewals")).isGreaterThanOrEqualTo(0);
+
+		mvc.perform(get("/api/notifications")).andExpect(status().isUnauthorized());
+	}
+
+	private static long count(String body, String area) {
+		return ((Number) JsonPath.read(body, "$." + area)).longValue();
 	}
 
 	// ── Helpers ─────────────────────────────────────────────────────────

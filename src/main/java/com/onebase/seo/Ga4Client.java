@@ -45,6 +45,11 @@ public class Ga4Client {
 		ObjectNode body = json.createObjectNode();
 		ArrayNode list = body.putArray("requests");
 		requests.forEach(list::add);
+		// ⚠️ Two tries when the connection fails (2026-10-28). The client keeps its
+		// connection to Google open between calls, and Google closes an idle one without
+		// warning: the next call failed on it, the page said "did not answer", and a reload
+		// worked. A report is a read, so asking again on a fresh connection is safe.
+		for (int attempt = 1; ; attempt++) {
 		try {
 			HttpResponse<String> response = http.send(HttpRequest.newBuilder(URI.create(API + propertyId + ":batchRunReports"))
 					.timeout(Duration.ofSeconds(30))
@@ -72,10 +77,15 @@ public class Ga4Client {
 			JsonNode reports = json.readTree(response.body()).path("reports");
 			return reports.isArray() ? List.copyOf(reports.valueStream().toList()) : List.of();
 		} catch (IOException e) {
-			throw new ApiException(HttpStatus.BAD_GATEWAY, "Google Analytics did not answer. Please try again in a moment.");
+			// Logged with its cause: until now this path left no trace of why it failed.
+			log.warn("GA4 call for property {} failed (attempt {}): {}", propertyId, attempt, e.toString());
+			if (attempt >= 2) {
+				throw new ApiException(HttpStatus.BAD_GATEWAY, "Google Analytics did not answer. Please try again in a moment.");
+			}
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			throw new ApiException(HttpStatus.BAD_GATEWAY, "Google Analytics did not answer. Please try again in a moment.");
+		}
 		}
 	}
 }

@@ -89,6 +89,31 @@ public final class ClientDtos {
 		}
 	}
 
+	/**
+	 * Add client (2026-10-28): who they are and how to reach them — never a plan or a
+	 * payment, which come with the first payment. Only the phone is required; until a
+	 * name is typed the screens call them by their number. Status: New when left out;
+	 * Trial and Pending may be chosen, the rest follow from messages, trials and payments.
+	 */
+	public record CreateClientRequest(
+			@Size(max = 120, message = "Keep the full name under 120 characters.") String fullName,
+			@Email(message = "This email address doesn't look right.")
+			@Size(max = 255, message = "Keep the email under 255 characters.") String email,
+			@Size(max = 30, message = "This phone number is too long.") String phone,
+			Long brandId,
+			Status status,
+			@Size(max = 5000, message = "Keep the note under 5000 characters.") String note) {
+
+		/** Tidied like an edit; empty is none, and no status is New. */
+		public CreateClientRequest {
+			fullName = fullName == null || fullName.isBlank() ? null : fullName.trim().replaceAll("\\s+", " ");
+			email = email == null || email.isBlank() ? null : email.trim().toLowerCase(java.util.Locale.ROOT);
+			phone = phone == null || phone.isBlank() ? null : phone.trim();
+			status = status == null ? Status.NEW : status;
+			note = note == null || note.isBlank() ? null : note.strip();
+		}
+	}
+
 	public record NoteRequest(@Size(max = 5000, message = "Keep the note under 5000 characters.") String note) {
 
 		public NoteRequest {

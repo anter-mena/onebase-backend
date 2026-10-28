@@ -15,6 +15,14 @@ public final class PaymentDtos {
 	private PaymentDtos() {
 	}
 
+	/** A proof file of a payment: what it is, not its bytes (those are at …/proofs/{id}). */
+	public record ProofResponse(long id, String filename, String mime, int sizeBytes) {
+	}
+
+	/** A proof file's bytes, to be served. */
+	public record ProofFile(byte[] bytes, String mime, String filename) {
+	}
+
 	public record PerkLineResponse(long perkId, String name, int quantity, BigDecimal unitCost) {
 	}
 
@@ -45,6 +53,7 @@ public final class PaymentDtos {
 			String paymentProvider,
 			String paymentMethodName,
 			List<PerkLineResponse> perks,
+			List<ProofResponse> proofs,
 			Instant createdAt) {
 	}
 

@@ -41,7 +41,7 @@ public class Client {
 		}
 	}
 
-	/** Who made the row. Only WHATSAPP since 2026-10-06 (no Add client); MANUAL stays allowed by V12. */
+	/** Who made the row: WhatsApp, or the team with Add client (back since 2026-10-28). */
 	public enum Source { MANUAL, WHATSAPP }
 
 	@Id
@@ -90,6 +90,22 @@ public class Client {
 	private Instant deletedAt;
 
 	protected Client() {
+	}
+
+	/** Added by hand (Add client, 2026-10-28): what the team typed, and who typed it. */
+	static Client manual(String fullName, String email, String phone, String country, Long brandId, Status status,
+			String note, long createdBy) {
+		Client client = new Client();
+		client.source = Source.MANUAL;
+		client.fullName = fullName;
+		client.email = email;
+		client.phone = phone;
+		client.country = country;
+		client.brandId = brandId;
+		client.status = status;
+		client.note = note;
+		client.createdBy = createdBy;
+		return client;
 	}
 
 	/** A number that wrote for the first time: New, no brand, named after its WhatsApp profile. */
